@@ -1,0 +1,32 @@
+# Build directories and artifacts
+build/
+GestC
+GestC.exe
+CMakeCache.txt
+CMakeFiles/
+*.ninja
+.ninja_*
+compile_commands.json
+*_autogen/
+.qt/
+.cmake/
+_deps/
+
+# Compiled object files and libraries
+*.o
+*.a
+*.so
+*.dll
+*.lib
+*.exp
+
+# IDE and environment settings
+.vscode/
+.idea/
+*.user
+*.suo
+*.sln
+
+# OS generated files
+.DS_Store
+Thumbs.db
