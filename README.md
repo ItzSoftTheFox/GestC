@@ -215,19 +215,14 @@ Windows uses `SendInput` API which integrates directly with the Windows message 
 
 ## Roadmap
 
-### ✅ Current (v1.0)
+### ✅ Current (v0.1)
 - Linux support with `/dev/uinput` backend
 - Windows support with `SendInput` backend
 - Core hand gesture recognition
 - Glassmorphism UI calibration panel
 
 ### 🔜 Planned
-- **v1.1**: Native macOS support with `Quartz` event API
-- **v1.2**: Hand pose classification (peace sign, thumbs up, etc.) for custom actions
-- **v2.0**: Multi-hand gesture recognition (two-hand gestures)
-- **v2.1**: Voice command integration
-- **v2.2**: Gesture recording and macro system
-- **Distant Future**: GPU acceleration for hand tracking pipeline
+- v0.2
 
 ## Contributing
 
