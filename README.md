@@ -27,7 +27,6 @@
 ⚡ **High Performance**
 - Efficient C++17 implementation
 - Optimized OpenCV processing pipeline
-- Minimal CPU/GPU footprint
 
 ## Prerequisites
 
@@ -202,10 +201,12 @@ Windows uses `SendInput` API which integrates directly with the Windows message 
 
 | Gesture | Action | Notes |
 |---------|--------|-------|
-| **Open hand** | Move cursor | Hand position maps to screen coordinates |
-| **Pinch** (thumb + index) | Left click | Hold for drag-and-drop operations |
-| **Raised middle finger** | Scroll | Upward/downward motion scrolls; speed is proportional |
-| **Palm facing camera** | Calibration mode | Activate for gesture training (optional) |
+| **Open hand** | Move cursor | Hand position maps to screen coordinates with configurable sensitivity |
+| **Pinch** (thumb + index) | Left click & drag | Hold for drag-and-drop operations |
+| **Pinch** (thumb + middle) | Right click | Single click with thumb and middle finger |
+| **Raised middle finger** | Scroll | Upward/downward motion scrolls; speed is proportional to finger height |
+| **Stop gesture** Full extended hand | Pause tracking | Temporarily disable gesture recognition |
+
 
 ### Tips for Best Results
 - **Lighting**: Ensure adequate, even lighting on your hand and face
@@ -215,14 +216,14 @@ Windows uses `SendInput` API which integrates directly with the Windows message 
 
 ## Roadmap
 
-### ✅ Current (v0.1)
-- Linux support with `/dev/uinput` backend
-- Windows support with `SendInput` backend
-- Core hand gesture recognition
-- Glassmorphism UI calibration panel
+### ✅ Current (v0.2)
+- Added more gestures for basic mouse controls
+- Added gesture for stop
 
 ### 🔜 Planned
-- v0.2
+- v0.3 GPU Acceleration + Optimization + Gestures
+- v0.4 Better and more friendly UI
+- v1.0 Full realase
 
 ## Contributing
 

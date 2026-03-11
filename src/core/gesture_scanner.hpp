@@ -17,6 +17,9 @@ class GestureScanner : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool isScanning READ isScanning NOTIFY isScanningChanged)
 
+    // Add this missing property to expose the pause state to QML
+    Q_PROPERTY(bool isPaused READ isPaused NOTIFY isPausedChanged)
+
     // Define UI-accessible properties for calibration
     Q_PROPERTY(float offsetX READ offsetX WRITE setOffsetX NOTIFY offsetXChanged)
     Q_PROPERTY(float offsetY READ offsetY WRITE setOffsetY NOTIFY offsetYChanged)
@@ -38,8 +41,10 @@ public:
 
     Q_INVOKABLE bool startCamera();
     Q_INVOKABLE void stopCamera();
+    Q_INVOKABLE void togglePause();
 
     bool isScanning() const;
+    bool isPaused() const;
 
     // Getters for the calibration values
     float offsetX() const;
@@ -71,6 +76,7 @@ signals:
     void smoothingFactorChanged();
     void clickThresholdChanged();
     void scrollSensitivityChanged();
+    void isPausedChanged();
 
 private slots:
     void processFrame();
@@ -105,12 +111,21 @@ private:
     bool m_isScanning;
     int m_releaseFrameCounter;
 
+    // Variables for right click state management
+    bool m_isRightClicked;
+    int m_rightReleaseFrameCounter;
+
     // Variables for joystick scroll and gesture state management
     bool m_isScrolling;
     float m_scrollAnchorY;
     float m_scrollSensitivity;
     int m_scrollReleaseCounter;
     float m_scrollAccumulator;
+
+    // Variables for system pause state
+    bool m_isPaused;
+    int m_pauseCooldown;
+    int m_pauseFrames;
 
     void detectHand(cv::Mat& frame);
     void drawLandmarks(cv::Mat& frame);

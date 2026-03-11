@@ -31,6 +31,11 @@ ApplicationWindow {
         onActivated: Qt.quit()
     }
 
+    Shortcut {
+        sequence: "P"
+        onActivated: scannerBackend.togglePause()
+    }
+
     // Main responsive grid container filling the entire window
     RowLayout {
         anchors.fill: parent
@@ -52,10 +57,34 @@ ApplicationWindow {
                 border.width: 1
                 radius: 8
 
-                VideoItem {
+                // Wrapper item to perfectly align the video and the overlay on top of each other
+                Item {
                     anchors.fill: parent
                     anchors.margins: 10
-                    scanner: scannerBackend
+
+                    VideoItem {
+                        anchors.fill: parent
+                        scanner: scannerBackend
+                    }
+
+                    // Dark overlay indicating the paused state
+                    Rectangle {
+                        anchors.fill: parent
+                        anchors.margins: 10
+                        color: Qt.rgba(0, 0, 0, 0.7)
+                        radius: 6
+                        // Require BOTH the system to be paused AND the camera to be actively scanning
+                        visible: scannerBackend.isPaused && scannerBackend.isScanning
+                        
+                        Text {
+                            anchors.centerIn: parent
+                            text: "PAUZNUTO"
+                            color: "white"
+                            font.pixelSize: 42
+                            font.bold: true
+                            font.letterSpacing: 6
+                        }
+                    }
                 }
             }
 

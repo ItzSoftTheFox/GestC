@@ -3,7 +3,9 @@
 GestureScanner::GestureScanner(QObject *parent) : QObject(parent), 
 m_isScanning(false), m_offsetX(0.0f), m_offsetY(0.0f), m_cropMultiplier(2.0f), m_movementScale(1.5f), 
 m_smoothingFactor(0.2f), m_clickThreshold(0.05f), m_isFirstFrame(true), m_isLeftClicked(false),
-m_releaseFrameCounter(0), m_isScrolling(false), m_scrollAnchorY(0.0f), m_scrollSensitivity(15.0f) {
+m_releaseFrameCounter(0), m_isRightClicked(false), m_rightReleaseFrameCounter(0),
+m_isScrolling(false), m_scrollAnchorY(0.0f), m_scrollSensitivity(15.0f),
+m_isPaused(false), m_pauseCooldown(0), m_pauseFrames(0) {
     
     timer = new QTimer(this);
     connect(timer, &QTimer::timeout, this, &GestureScanner::processFrame);
@@ -158,6 +160,25 @@ bool GestureScanner::initModel() {
     }
 }
 
+bool GestureScanner::isPaused() const { 
+    return m_isPaused; 
+}
+
+void GestureScanner::togglePause() {
+    m_isPaused = !m_isPaused;
+    emit isPausedChanged();
+    
+    // Safety cleanup when pausing manually
+    if (m_isPaused && mouse) {
+        if (m_isLeftClicked) {
+            mouse->click(false);
+            m_isLeftClicked = false;
+        }
+        m_isScrolling = false;
+        m_scrollAccumulator = 0.0f;
+    }
+}
+
 void GestureScanner::detectHand(cv::Mat& frame) {
     if (palmNet.empty() || landmarkNet.empty()) return;
 
@@ -196,9 +217,6 @@ void GestureScanner::detectHand(cv::Mat& frame) {
                 bestIndex = i;
             }
         }
-
-        // Print the highest probability and its index to the terminal
-        std::cout << "Best Hand Score: " << maxScore << " at anchor index: " << bestIndex << std::endl;
         
         // Check if the confidence score is high enough to process
         if (maxScore > 0.5f) {
@@ -258,10 +276,9 @@ void GestureScanner::detectHand(cv::Mat& frame) {
 
                 // Proceed only if the crop area is geometrically valid
                 if (squareBox.area() > 0) {
-                    // Isolate the hand without warping the aspect ratio
+                    cv::rectangle(frame, squareBox, cv::Scalar(0, 255, 255), 2);
+
                     cv::Mat handCrop = frame(squareBox);
-                    
-                    // Process the clean, shifted crop in the landmark network
                     processLandmarks(handCrop, squareBox, frame.cols, frame.rows);
                 }
             }
@@ -270,16 +287,50 @@ void GestureScanner::detectHand(cv::Mat& frame) {
 }
 
 void GestureScanner::drawLandmarks(cv::Mat& frame) {
+    if (currentLandmarks.empty()) return;
+
+    // Convert normalized coordinates to exact pixel coordinates
+    std::vector<cv::Point> pixelPoints;
     for (const auto& lm : currentLandmarks) {
-        // Calculate the exact pixel position on your real camera frame.
-        // Landmarks are stored as normalized coordinates (0.0 - 1.0)
         int px = static_cast<int>(lm.x * frame.cols);
         int py = static_cast<int>(lm.y * frame.rows);
-        
-        // Ensure point is within frame bounds before drawing
-        if (px >= 0 && px < frame.cols && py >= 0 && py < frame.rows) {
-            // Draw a green circle at the calculated position.
-            cv::circle(frame, cv::Point(px, py), 8, cv::Scalar(0, 255, 0), cv::FILLED);
+        pixelPoints.push_back(cv::Point(px, py));
+    }
+
+    // MediaPipe Hand Skeleton connections mapping
+    std::vector<std::pair<int, int>> connections = {
+        // Thumb
+        {0, 1}, {1, 2}, {2, 3}, {3, 4},
+        // Index finger
+        {0, 5}, {5, 6}, {6, 7}, {7, 8},
+        // Middle finger
+        {9, 10}, {10, 11}, {11, 12},
+        // Ring finger
+        {13, 14}, {14, 15}, {15, 16},
+        // Pinky finger
+        {0, 17}, {17, 18}, {18, 19}, {19, 20},
+        // Palm web connections
+        {5, 9}, {9, 13}, {13, 17}
+    };
+
+    // Draw the structural lines first so they sit under the joints
+    for (const auto& conn : connections) {
+        // Ensure both points are within the bounds of our extracted array to prevent crashes
+        if (conn.first < pixelPoints.size() && conn.second < pixelPoints.size()) {
+            cv::Point p1 = pixelPoints[conn.first];
+            cv::Point p2 = pixelPoints[conn.second];
+            
+            // Draw a thin blue line for the bones
+            cv::line(frame, p1, p2, cv::Scalar(255, 0, 0), 2);
+        }
+    }
+
+    // Draw the joints on top of the lines
+    for (const auto& pt : pixelPoints) {
+        // Ensure point is within physical frame bounds before drawing
+        if (pt.x >= 0 && pt.x < frame.cols && pt.y >= 0 && pt.y < frame.rows) {
+            // Draw a solid green circle for the joint
+            cv::circle(frame, pt, 5, cv::Scalar(0, 255, 0), cv::FILLED);
         }
     }
 }
@@ -333,12 +384,14 @@ void GestureScanner::processLandmarks(const cv::Mat& crop, const cv::Rect& box, 
     if (!landmarkTensor.empty()) {
         float* data = landmarkTensor.ptr<float>();
 
-        // 3. Extract coordinates for cursor movement (Middle finger base)
+        //------------------------------------------------------------------------------
+
+        // Extract coordinates for cursor movement (Middle finger base)
         float rawPalmX = data[9 * 3];
         float rawPalmY = data[9 * 3 + 1];
         float rawPalmZ = data[9 * 3 + 2];
             
-        // 4. Extract coordinates for gesture recognition
+        // Extract coordinates for gesture recognition
         float rawThumbX = data[4 * 3];
         float rawThumbY = data[4 * 3 + 1];
         float rawThumbZ = data[4 * 3 + 2];
@@ -359,8 +412,28 @@ void GestureScanner::processLandmarks(const cv::Mat& crop, const cv::Rect& box, 
         float rawWristX = data[0 * 3];
         float rawWristY = data[0 * 3 + 1];
         float rawWristZ = data[0 * 3 + 2];
-            
-        // 5. Normalize palm coordinates for screen movement
+
+        // Extract coordinates for the ring finger tip (16) and MCP joint (13)
+        float rawRingTipX = data[16 * 3];
+        float rawRingTipY = data[16 * 3 + 1];
+        float rawRingTipZ = data[16 * 3 + 2];
+
+        float rawRingMcpX = data[13 * 3];
+        float rawRingMcpY = data[13 * 3 + 1];
+        float rawRingMcpZ = data[13 * 3 + 2];
+
+        // Extract coordinates for the pinky finger tip (20) and MCP joint (17)
+        float rawPinkyTipX = data[20 * 3];
+        float rawPinkyTipY = data[20 * 3 + 1];
+        float rawPinkyTipZ = data[20 * 3 + 2];
+
+        float rawPinkyMcpX = data[17 * 3];
+        float rawPinkyMcpY = data[17 * 3 + 1];
+        float rawPinkyMcpZ = data[17 * 3 + 2];
+
+        //------------------------------------------------------------------------------
+
+        // Normalize palm coordinates for screen movement
         float localPalmX = rawPalmX;
         float localPalmY = rawPalmY;
         if (rawPalmX > 1.0f || rawPalmY > 1.0f || rawPalmX < -1.0f || rawPalmY < -1.0f) {
@@ -376,14 +449,41 @@ void GestureScanner::processLandmarks(const cv::Mat& crop, const cv::Rect& box, 
         float globalX = box.x + (localPalmX * box.width);
         float globalY = box.y + (localPalmY * box.height);
 
-        // Store the palm coordinate for QML rendering
-        HandLandmark palmMark;
-        palmMark.x = globalX / static_cast<float>(frameWidth);
-        palmMark.y = globalY / static_cast<float>(frameHeight);
-        palmMark.z = 0.0f;
-        currentLandmarks.push_back(palmMark);
+        // Store ALL 21 coordinates for skeleton rendering and calculation
+        currentLandmarks.clear();
+        for (int i = 0; i < 21; ++i) {
+            // Extract raw landmark data
+            float rawX = data[i * 3];
+            float rawY = data[i * 3 + 1];
+            float rawZ = data[i * 3 + 2];
+            
+            // Normalize coordinates
+            float localX = rawX;
+            float localY = rawY;
+            if (rawX > 1.0f || rawY > 1.0f || rawX < -1.0f || rawY < -1.0f) {
+                localX /= 256.0f;
+                localY /= 256.0f;
+            }
+            
+            // Map local crop coordinates back to global camera frame
+            float globalLandmarkX = box.x + (localX * box.width);
+            float globalLandmarkY = box.y + (localY * box.height);
+            
+            HandLandmark mark;
+            mark.x = globalLandmarkX / static_cast<float>(frameWidth);
+            mark.y = globalLandmarkY / static_cast<float>(frameHeight);
+            mark.z = rawZ; // Keep raw Z for depth calculations
+            
+            currentLandmarks.push_back(mark);
+        }
+        
+        // Use the middle finger base (index 9) for cursor movement as before
+        HandLandmark palmMark = currentLandmarks[9];
+        // Apply calibration offsets strictly for the cursor movement
+        palmMark.x += (m_offsetX / static_cast<float>(frameWidth));
+        palmMark.y += (m_offsetY / static_cast<float>(frameHeight));
 
-        // 6. Execute system actions if the virtual mouse is ready
+        // Execute system actions if the virtual mouse is ready
         if (mouse) {
             
             // --- GESTURE MATH PREPARATION ---
@@ -414,89 +514,139 @@ void GestureScanner::processLandmarks(const cv::Mat& crop, const cv::Rect& box, 
                 isPhysicallyPinching = true;
             }
 
-            // Calculate exact 3D distances from the wrist for the middle finger
-            float tipDx = rawMidTipX - rawWristX;
-            float tipDy = rawMidTipY - rawWristY;
-            float tipDz = rawMidTipZ - rawWristZ;
-            float distToTip = std::sqrt((tipDx * tipDx) + (tipDy * tipDy) + (tipDz * tipDz));
+            // Evaluate Index finger extension
+            float indexTipDist = std::sqrt(std::pow(rawIndexX - rawWristX, 2) + std::pow(rawIndexY - rawWristY, 2) + std::pow(rawIndexZ - rawWristZ, 2));
+            float rawIndexPipX = data[6 * 3]; float rawIndexPipY = data[6 * 3 + 1]; float rawIndexPipZ = data[6 * 3 + 2];
+            float indexPipDist = std::sqrt(std::pow(rawIndexPipX - rawWristX, 2) + std::pow(rawIndexPipY - rawWristY, 2) + std::pow(rawIndexPipZ - rawWristZ, 2));
+            // Add a spatial margin (15% of palm size) to require a clearly straightened finger
+            bool isIndexFingerUp = (indexTipDist > indexPipDist + (palmSize * 0.15f));
 
-            float pipDx = rawMidPipX - rawWristX;
-            float pipDy = rawMidPipY - rawWristY;
-            float pipDz = rawMidPipZ - rawWristZ;
-            float distToPip = std::sqrt((pipDx * pipDx) + (pipDy * pipDy) + (pipDz * pipDz));
+            // Evaluate Middle finger extension
+            float midTipDist = std::sqrt(std::pow(rawMidTipX - rawWristX, 2) + std::pow(rawMidTipY - rawWristY, 2) + std::pow(rawMidTipZ - rawWristZ, 2));
+            float midPipDist = std::sqrt(std::pow(rawMidPipX - rawWristX, 2) + std::pow(rawMidPipY - rawWristY, 2) + std::pow(rawMidPipZ - rawWristZ, 2));
+            bool isMiddleFingerUp = (midTipDist > midPipDist + (palmSize * 0.15f));
 
-            // The middle finger is extended if the tip is further from the wrist than the PIP joint
-            bool isMiddleFingerUp = (distToTip > distToPip);
+            // Evaluate Ring finger extension
+            float ringTipDist = std::sqrt(std::pow(rawRingTipX - rawWristX, 2) + std::pow(rawRingTipY - rawWristY, 2) + std::pow(rawRingTipZ - rawWristZ, 2));
+            float rawRingPipX = data[14 * 3]; float rawRingPipY = data[14 * 3 + 1]; float rawRingPipZ = data[14 * 3 + 2];
+            float ringPipDist = std::sqrt(std::pow(rawRingPipX - rawWristX, 2) + std::pow(rawRingPipY - rawWristY, 2) + std::pow(rawRingPipZ - rawWristZ, 2));
+            bool isRingFingerUp = (ringTipDist > ringPipDist + (palmSize * 0.15f));
 
-            // --- STATE MACHINE EXECUTION ---
+            // Evaluate Pinky finger extension
+            float pinkyTipDist = std::sqrt(std::pow(rawPinkyTipX - rawWristX, 2) + std::pow(rawPinkyTipY - rawWristY, 2) + std::pow(rawPinkyTipZ - rawWristZ, 2));
+            float rawPinkyPipX = data[18 * 3]; float rawPinkyPipY = data[18 * 3 + 1]; float rawPinkyPipZ = data[18 * 3 + 2];
+            float pinkyPipDist = std::sqrt(std::pow(rawPinkyPipX - rawWristX, 2) + std::pow(rawPinkyPipY - rawWristY, 2) + std::pow(rawPinkyPipZ - rawWristZ, 2));
+            bool isPinkyFingerUp = (pinkyTipDist > pinkyPipDist + (palmSize * 0.15f));
+
+            // Evaluate Thumb folding (Tip vs Index finger MCP joint)
+            float rawIndexMcpX = data[5 * 3];
+            float rawIndexMcpY = data[5 * 3 + 1];
+            float rawIndexMcpZ = data[5 * 3 + 2];
             
-            // 1. EVALUATE SCROLL STATE WITH DEBOUNCE
-            bool intendsToScroll = (isMiddleFingerUp && !isPhysicallyPinching && !m_isLeftClicked);
+            float thumbToIndexDx = rawThumbX - rawIndexMcpX;
+            float thumbToIndexDy = rawThumbY - rawIndexMcpY;
+            float thumbToIndexDz = rawThumbZ - rawIndexMcpZ;
+            
+            float thumbToIndexDist = std::sqrt((thumbToIndexDx * thumbToIndexDx) + 
+                                               (thumbToIndexDy * thumbToIndexDy) + 
+                                               (thumbToIndexDz * thumbToIndexDz));
+            
+            // Thumb is folded if its tip is close to the base of the index finger
+            bool isThumbFolded = (thumbToIndexDist < (palmSize * 0.40f));
 
-            if (intendsToScroll) {
-                // Reset the drop counter immediately when network sees the gesture
-                m_scrollReleaseCounter = 0; 
-                
-                if (!m_isScrolling) {
-                    m_isScrolling = true;
-                    // FIX: Use the global normalized camera coordinate, NOT the local crop coordinate
-                    m_scrollAnchorY = palmMark.y; 
-                    std::cout << "JOYSTICK SCROLL ACTIVATED." << std::endl;
-                }
+            // Require all four main fingers to be clearly extended outward for pause
+            bool isPalmOpen = isIndexFingerUp && isMiddleFingerUp && isRingFingerUp && isPinkyFingerUp && !isPhysicallyPinching;
+            
+            // Right-click gesture: Thumb is explicitly extended, Index is folded, others are folded (Thumbs-up shape)
+            bool isRightClickGesture = !isThumbFolded && !isIndexFingerUp && !isMiddleFingerUp && !isRingFingerUp && !isPinkyFingerUp;
+            
+            // --- SYSTEM PAUSE TOGGLE ---
+            
+            // Require the user to hold the open palm gesture continuously
+            if (isPalmOpen) {
+                m_pauseFrames++;
             } else {
-                if (m_isScrolling) {
-                    // Increment buffer instead of exiting immediately
-                    m_scrollReleaseCounter++;
-                    
-                    // Exit scroll mode only after 5 consecutive lost frames (approx 160ms)
-                    if (m_scrollReleaseCounter >= 5) {
-                        m_isScrolling = false;
-                        m_scrollReleaseCounter = 0;
-                        m_scrollAccumulator = 0.0f; // Safely reset the accumulator
-                        std::cout << "JOYSTICK SCROLL DEACTIVATED." << std::endl;
-                    }
-                }
+                // Instantly reset the holding counter if a finger drops or twitches
+                m_pauseFrames = 0;
             }
 
-            // 2. EXECUTE ACTIONS BASED ON FILTERED STATE
-            if (m_isScrolling) {
-                // Calculate distance using the global camera frame coordinate
-                float offset = palmMark.y - m_scrollAnchorY;
-                
-                // Define a deadzone (0.04f = exactly 4% of the total vertical camera view)
-                float deadzone = 0.04f;
+            // Decrease the cooldown timer only when the hand is NOT fully open
+            if (!isPalmOpen && m_pauseCooldown > 0) {
+                m_pauseCooldown--;
+            }
 
-                if (std::abs(offset) > deadzone) {
-                    // Extract the active movement distance beyond the deadzone boundary
-                    float activeOffset = std::abs(offset) - deadzone;
-                    
-                    // Determine the scroll direction
-                    // A negative offset means the hand is physically above the anchor (scroll UP)
-                    int direction = (offset < 0) ? 1 : -1;
-                    
-                    // Calculate the current scroll speed based on absolute distance and UI sensitivity
-                    float currentSpeed = activeOffset * m_scrollSensitivity;
-                    
-                    // Add the calculated fractional speed to the system accumulator
-                    m_scrollAccumulator += (currentSpeed * direction);
-                    
-                    // Send the hardware signal only after accumulating at least one full integer step
-                    if (std::abs(m_scrollAccumulator) >= 1.0f) {
-                        int stepsToScroll = static_cast<int>(m_scrollAccumulator);
-                        mouse->scroll(stepsToScroll);
-                        m_scrollAccumulator -= stepsToScroll;
+            // Toggle the pause state only if the gesture is held for 10 consecutive frames (approx 300ms)
+            if (m_pauseFrames >= 10 && m_pauseCooldown == 0) {
+                m_isPaused = !m_isPaused;
+                
+                // Require a 30-frame reset period after the hand closes
+                m_pauseCooldown = 30; 
+                
+                // Reset the holding counter so it doesn't immediately trigger again
+                m_pauseFrames = 0;
+                
+                emit isPausedChanged();
+                
+                if (m_isPaused) {
+                    if (m_isLeftClicked) {
+                        mouse->click(false);
+                        m_isLeftClicked = false;
                     }
-                } else {
-                    // Instantly flush the accumulator when the hand returns to the deadzone
+                    m_isScrolling = false;
                     m_scrollAccumulator = 0.0f;
                 }
-            } else {
-                // --- NORMAL CURSOR MOVEMENT ---
-                // Scale movement outward from the center
+            }
+            
+            // --- PARALLEL EXECUTION PIPELINE ---
+            
+            // Execute mouse controls only if the system is active
+            if (!m_isPaused) {
+                
+                // 1. SCROLL PIPELINE
+                bool intendsToScroll = isMiddleFingerUp;
+
+                if (intendsToScroll) {
+                    m_scrollReleaseCounter = 0; 
+                    if (!m_isScrolling) {
+                        m_isScrolling = true;
+                        m_scrollAnchorY = palmMark.y; 
+                    }
+                } else {
+                    if (m_isScrolling) {
+                        m_scrollReleaseCounter++;
+                        if (m_scrollReleaseCounter >= 5) {
+                            m_isScrolling = false;
+                            m_scrollReleaseCounter = 0;
+                            m_scrollAccumulator = 0.0f; 
+                        }
+                    }
+                }
+
+                if (m_isScrolling) {
+                    float offset = palmMark.y - m_scrollAnchorY;
+                    float deadzone = 0.04f;
+
+                    if (std::abs(offset) > deadzone) {
+                        float activeOffset = std::abs(offset) - deadzone;
+                        int direction = (offset < 0) ? 1 : -1;
+                        float currentSpeed = activeOffset * m_scrollSensitivity;
+                        
+                        m_scrollAccumulator += (currentSpeed * direction);
+                        
+                        if (std::abs(m_scrollAccumulator) >= 1.0f) {
+                            int stepsToScroll = static_cast<int>(m_scrollAccumulator);
+                            mouse->scroll(stepsToScroll);
+                            m_scrollAccumulator -= stepsToScroll;
+                        }
+                    } else {
+                        m_scrollAccumulator = 0.0f;
+                    }
+                }
+
+                // 2. MOVEMENT PIPELINE
                 float scaledX = ((palmMark.x - 0.5f) * m_movementScale) + 0.5f;
                 float scaledY = ((palmMark.y - 0.5f) * m_movementScale) + 0.5f;
 
-                // Apply Exponential Moving Average (EMA) for cursor stability
                 if (m_isFirstFrame) {
                     m_smoothedX = scaledX;
                     m_smoothedY = scaledY;
@@ -506,16 +656,14 @@ void GestureScanner::processLandmarks(const cv::Mat& crop, const cv::Rect& box, 
                     m_smoothedY = (scaledY * m_smoothingFactor) + (m_smoothedY * (1.0f - m_smoothingFactor));
                 }
 
-                // Move the mouse only when not scrolling
                 mouse->move(m_smoothedX, m_smoothedY);
 
-                // --- NORMAL CLICK EXECUTION ---
+                // 3. CLICK AND DRAG PIPELINE
                 if (isPhysicallyPinching) {
                     m_releaseFrameCounter = 0;
                     if (!m_isLeftClicked) {
                         mouse->click(true);
                         m_isLeftClicked = true;
-                        std::cout << "DRAG STARTED." << std::endl;
                     }
                 } else {
                     if (m_isLeftClicked) {
@@ -524,11 +672,27 @@ void GestureScanner::processLandmarks(const cv::Mat& crop, const cv::Rect& box, 
                             mouse->click(false);
                             m_isLeftClicked = false;
                             m_releaseFrameCounter = 0;
-                            std::cout << "DRAG RELEASED." << std::endl;
                         }
                     }
                 }
-            }
+                // 4. RIGHT CLICK PIPELINE
+                if (isRightClickGesture) {
+                    m_rightReleaseFrameCounter = 0;
+                    if (!m_isRightClicked) {
+                        mouse->rightClick(true);
+                        m_isRightClicked = true;
+                    }
+                } else {
+                    if (m_isRightClicked) {
+                        m_rightReleaseFrameCounter++;
+                        if (m_rightReleaseFrameCounter >= 4) {
+                            mouse->rightClick(false);
+                            m_isRightClicked = false;
+                            m_rightReleaseFrameCounter = 0;
+                        }
+                    }
+                }
+            } // Konec exekučního bloku pro aktivní stav
         }
     } else {
         std::cout << "Valid 2D landmark tensor not found." << std::endl;

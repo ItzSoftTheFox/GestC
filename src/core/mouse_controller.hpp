@@ -13,6 +13,7 @@ public:
     void move(float normalizedX, float normalizedY);
     void click(bool pressed);
     void scroll(int steps);
+    void rightClick(bool isDown);
 private:
     int fd;
     int screenW;

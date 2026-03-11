@@ -27,6 +27,7 @@ bool MouseController::setupDevice() {
 
     ioctl(fd, UI_SET_EVBIT, EV_KEY);
     ioctl(fd, UI_SET_KEYBIT, BTN_LEFT);
+    ioctl(fd, UI_SET_KEYBIT, BTN_RIGHT);
 
     // Enable relative events and the hardware scroll wheel axis
     ioctl(fd, UI_SET_EVBIT, EV_REL);
@@ -92,6 +93,14 @@ void MouseController::click(bool pressed) {
     emitEvent(EV_KEY, BTN_LEFT, pressed ? 1 : 0);
     
     // Always send a sync event to force the kernel to process the action
+    emitEvent(EV_SYN, SYN_REPORT, 0);
+}
+
+void MouseController::rightClick(bool isDown) {
+    if (fd < 0) return;
+    
+    // Send the right button event directly to the virtual input device
+    emitEvent(EV_KEY, BTN_RIGHT, isDown ? 1 : 0);
     emitEvent(EV_SYN, SYN_REPORT, 0);
 }
 
