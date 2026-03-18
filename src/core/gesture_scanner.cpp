@@ -5,7 +5,8 @@ m_isScanning(false), m_offsetX(0.0f), m_offsetY(0.0f), m_cropMultiplier(2.0f), m
 m_smoothingFactor(0.2f), m_clickThreshold(0.05f), m_isFirstFrame(true), m_isLeftClicked(false),
 m_releaseFrameCounter(0), m_isRightClicked(false), m_rightReleaseFrameCounter(0),
 m_isScrolling(false), m_scrollAnchorY(0.0f), m_scrollSensitivity(15.0f),
-m_isPaused(false), m_pauseCooldown(0), m_pauseFrames(0) {
+m_isPaused(false), m_pauseCooldown(0), m_pauseFrames(0), m_isHandTracked(false), m_searchFrameCounter(0),
+m_useGPU(false) {
     
     timer = new QTimer(this);
     connect(timer, &QTimer::timeout, this, &GestureScanner::processFrame);
@@ -25,6 +26,9 @@ float GestureScanner::smoothingFactor() const { return m_smoothingFactor; }
 float GestureScanner::clickThreshold() const { return m_clickThreshold; }
 float GestureScanner::scrollSensitivity() const { return m_scrollSensitivity; }
 
+bool GestureScanner::useGPU() const { return m_useGPU; }
+bool GestureScanner::backlightCompensation() const { return m_backlightCompensation; }
+
 // ----------SETTERs--------------
 
 void GestureScanner::setCropMultiplier(float value) {
@@ -39,6 +43,11 @@ void GestureScanner::setScrollSensitivity(float value) {
     emit scrollSensitivityChanged();
 }
 
+void GestureScanner::setBacklightCompensation(bool value) {
+    if (m_backlightCompensation == value) return;
+    m_backlightCompensation = value;
+    emit backlightCompensationChanged();
+}
 // calibration setters with signal emission
 void GestureScanner::setOffsetX(float value) {
     if (m_offsetX == value) return;
@@ -77,6 +86,31 @@ GestureScanner::~GestureScanner() {
     // Bezpečné uvolnění hardwarových prostředků při ukončení programu
     stopCamera();
     delete mouse;
+}
+
+bool GestureScanner::initModel() {
+    cv::setNumThreads(2);
+
+    try {
+        // Use the exact filenames from your screenshot
+        std::string palmPath = "/home/Fox/Plocha/Projects/GestC/models/hand_detector.tflite";
+        std::string landmarkPath = "/home/Fox/Plocha/Projects/GestC/models/hand_landmarks_detector.tflite";
+        
+        // Load the hand bounding box detector
+        palmNet = cv::dnn::readNet(palmPath);
+        palmNet.setPreferableBackend(cv::dnn::DNN_BACKEND_OPENCV);
+        palmNet.setPreferableTarget(m_useGPU ? cv::dnn::DNN_TARGET_OPENCL : cv::dnn::DNN_TARGET_CPU);
+        // Load the detailed 21-point landmark detector
+        landmarkNet = cv::dnn::readNet(landmarkPath);
+        landmarkNet.setPreferableBackend(cv::dnn::DNN_BACKEND_OPENCV);
+        landmarkNet.setPreferableTarget(m_useGPU ? cv::dnn::DNN_TARGET_OPENCL : cv::dnn::DNN_TARGET_CPU);
+        
+        std::cout << "Both neural networks loaded successfully." << std::endl;
+        return true;
+    } catch (const cv::Exception& e) {
+        std::cerr << "Failed to load models: " << e.what() << std::endl;
+        return false;
+    }
 }
 
 bool GestureScanner::startCamera() {
@@ -123,10 +157,46 @@ void GestureScanner::processFrame() {
     
     if (frame.empty()) return;
 
-    // Flip the image horizontally for natural user interaction.
-    // The value 1 means flipping around the y-axis.
+    // Flip the image horizontally first
     cv::flip(frame, frame, 1);
 
+    // --- PHASE 3: DYNAMIC BACKLIGHT COMPENSATION (CLAHE) ---
+    if (m_backlightCompensation) {
+        // 1. Fast Gamma Correction to aggressively lift deep shadows
+        cv::Mat lookUpTable(1, 256, CV_8U);
+        uchar* p = lookUpTable.ptr();
+        
+        // Gamma < 1.0 brightens the image. 0.4 is a strong boost for heavy backlight.
+        float gamma = 0.4f; 
+        for (int i = 0; i < 256; ++i) {
+            p[i] = cv::saturate_cast<uchar>(std::pow(i / 255.0, gamma) * 255.0);
+        }
+        
+        // Apply the pre-calculated transformation to the whole frame
+        cv::LUT(frame, lookUpTable, frame);
+
+        // Convert to YCrCb color space to isolate brightness (Y) from colors (Cr, Cb)
+        // We do this to prevent color distortion when changing contrast.
+        cv::Mat ycrcb;
+        cv::cvtColor(frame, ycrcb, cv::COLOR_BGR2YCrCb);
+        
+        std::vector<cv::Mat> channels;
+        cv::split(ycrcb, channels);
+        
+        // Create CLAHE with adaptive tile-based contrast enhancement
+        // ClipLimit 2.0 prevents extreme noise boost, TileGridSize 8x8 works well for hands.
+        cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE(2.0, cv::Size(8, 8));
+        
+        // Apply strictly to the Luma (Brightness) channel to pull detail from shadows
+        clahe->apply(channels[0], channels[0]);
+        
+        // Merge the brightened Luma back with original Chroma channels and return to BGR
+        cv::merge(channels, ycrcb);
+        cv::cvtColor(ycrcb, frame, cv::COLOR_YCrCb2BGR);
+    }
+    // ---------------------------------------------------------
+
+    detectHand(frame);
     detectHand(frame);
     drawLandmarks(frame);
     
@@ -136,28 +206,17 @@ void GestureScanner::processFrame() {
     emit frameReady(qimg.copy());
 }
 
-bool GestureScanner::initModel() {
-    try {
-        // Use the exact filenames from your screenshot
-        std::string palmPath = "/home/Fox/Plocha/Projects/GestC/models/hand_detector.tflite";
-        std::string landmarkPath = "/home/Fox/Plocha/Projects/GestC/models/hand_landmarks_detector.tflite";
-        
-        // Load the hand bounding box detector
-        palmNet = cv::dnn::readNet(palmPath);
-        palmNet.setPreferableBackend(cv::dnn::DNN_BACKEND_OPENCV);
-        palmNet.setPreferableTarget(cv::dnn::DNN_TARGET_CPU);
+void GestureScanner::setUseGPU(bool value) {
+    if (m_useGPU == value) return;
+    m_useGPU = value;
+    emit useGPUChanged();
+ 
+    bool wasRunning = m_isScanning;
+    if (wasRunning) stopCamera();
 
-        // Load the detailed 21-point landmark detector
-        landmarkNet = cv::dnn::readNet(landmarkPath);
-        landmarkNet.setPreferableBackend(cv::dnn::DNN_BACKEND_OPENCV);
-        landmarkNet.setPreferableTarget(cv::dnn::DNN_TARGET_CPU);
-        
-        std::cout << "Both neural networks loaded successfully." << std::endl;
-        return true;
-    } catch (const cv::Exception& e) {
-        std::cerr << "Failed to load models: " << e.what() << std::endl;
-        return false;
-    }
+    initModel();
+
+    if (wasRunning) startCamera();
 }
 
 bool GestureScanner::isPaused() const { 
@@ -182,104 +241,150 @@ void GestureScanner::togglePause() {
 void GestureScanner::detectHand(cv::Mat& frame) {
     if (palmNet.empty() || landmarkNet.empty()) return;
 
-    // --- PHASE 1: FIND THE HAND IN THE ROOM ---
+    cv::Rect nextBox;
+    bool useTracking = false;
     
-    cv::Mat palmBlob = cv::dnn::blobFromImage(frame, 1.0 / 255.0, cv::Size(192, 192), cv::Scalar(), true, false);
-    palmNet.setInput(palmBlob);
-    
-    std::vector<cv::Mat> palmOutputs;
-    palmNet.forward(palmOutputs, palmNet.getUnconnectedOutLayersNames());
+    // ZÍTŘÍ: We will use a filter on bounding box size to prevent rapid jumping
+    static cv::Rect s_smoothedBox; 
+    const float smoothingFactor = 0.5f;
 
-    currentLandmarks.clear();
+    // --- PHASE 2: FAST TRACKING PIPELINE ---
+    if (m_isHandTracked && !currentLandmarks.empty() && currentLandmarks.size() >= 21) {
+        
+        // Use strict palm distance to calculate scale, ignoring moving fingers
+        float dx = (currentLandmarks[9].x - currentLandmarks[0].x) * frame.cols;
+        float dy = (currentLandmarks[9].y - currentLandmarks[0].y) * frame.rows;
+        int pixelDist = static_cast<int>(std::sqrt(dx * dx + dy * dy));
+        
+        // Center the box precisely in the middle of the palm
+        int centerX = static_cast<int>((currentLandmarks[9].x + currentLandmarks[0].x) * 0.5f * frame.cols);
+        int centerY = static_cast<int>((currentLandmarks[9].y + currentLandmarks[0].y) * 0.5f * frame.rows);
 
-    if (!palmOutputs.empty()) {
-        // Tensor 0 contains the confidence scores. Tensor 1 contains the spatial coordinates.
-        // We need to identify the exact index of the classification tensor.
-        // Usually, the smaller tensor (2016 elements) is the score, and the larger (2016 * 18) is the bounding box.
+        // Keep the box tightly wrapped around the hand (3.5x palm size)
+        int targetSquareSize = static_cast<int>(pixelDist * 3.5f);
+
+        // Calculate the raw target box without EMA smoothing yet
+        cv::Rect targetBox = cv::Rect(
+            centerX - targetSquareSize / 2, 
+            centerY - targetSquareSize / 2, 
+            targetSquareSize, 
+            targetSquareSize
+        );
         
-        int scoreTensorIndex = (palmOutputs[0].total() < palmOutputs[1].total()) ? 0 : 1;
-        cv::Mat scoreTensor = palmOutputs[scoreTensorIndex];
-        
-        // Get a direct pointer to the 2016 confidence scores
-        float* scores = scoreTensor.ptr<float>();
-        
-        // Find the index of the anchor box with the highest confidence
-        int bestIndex = 0;
-        float maxScore = -1.0f;
-        
-        for (int i = 0; i < 2016; ++i) {
-            // Apply a sigmoid function to the raw score to get a proper probability
-            // Some TFLite models output raw logits instead of probabilities
-            float currentScore = 1.0f / (1.0f + std::exp(-scores[i]));
-            
-            if (currentScore > maxScore) {
-                maxScore = currentScore;
-                bestIndex = i;
+        targetBox &= cv::Rect(0, 0, frame.cols, frame.rows);
+
+        if (targetBox.area() > 0) {
+            if (s_smoothedBox.area() == 0) {
+                s_smoothedBox = targetBox;
+            } else {
+                s_smoothedBox.x = static_cast<int>(s_smoothedBox.x * smoothingFactor + targetBox.x * (1 - smoothingFactor));
+                s_smoothedBox.y = static_cast<int>(s_smoothedBox.y * smoothingFactor + targetBox.y * (1 - smoothingFactor));
+                s_smoothedBox.width = static_cast<int>(s_smoothedBox.width * smoothingFactor + targetBox.width * (1 - smoothingFactor));
+                s_smoothedBox.height = static_cast<int>(s_smoothedBox.height * smoothingFactor + targetBox.height * (1 - smoothingFactor));
+                s_smoothedBox &= cv::Rect(0, 0, frame.cols, frame.rows);
+            }
+            nextBox = s_smoothedBox;
+            if (nextBox.area() > 0) {
+                useTracking = true;
             }
         }
+    }
+
+    if (useTracking) {
+        // Drawing green rectangle
+        cv::rectangle(frame, nextBox, cv::Scalar(0, 255, 0), 2);
         
-        // Check if the confidence score is high enough to process
-        if (maxScore > 0.5f) {
-            int boxTensorIndex = (scoreTensorIndex == 0) ? 1 : 0;
-            cv::Mat boxTensor = palmOutputs[boxTensorIndex];
-            float* boxData = boxTensor.ptr<float>();
-            int dataOffset = bestIndex * 18;
-            
-            float dx = boxData[dataOffset];
-            float dy = boxData[dataOffset + 1];
-            float boxWidth = boxData[dataOffset + 2];
-            float boxHeight = boxData[dataOffset + 3];
-            
-            // Decode the bounding box using the pre-calculated anchor
-            // Divide raw deltas by the input image size (192.0)
-            float centerX = (dx / 192.0f) + anchors[bestIndex].x;
-            float centerY = (dy / 192.0f) + anchors[bestIndex].y;
-            float width = boxWidth / 192.0f;
-            float height = boxHeight / 192.0f;
-            
-            // Convert normalized coordinates (0.0 - 1.0) to actual frame pixels
-            int pixelX = static_cast<int>((centerX - width / 2.0f) * frame.cols);
-            int pixelY = static_cast<int>((centerY - height / 2.0f) * frame.rows);
-            int pixelWidth = static_cast<int>(width * frame.cols);
-            int pixelHeight = static_cast<int>(height * frame.rows);
-            
-            // Create a safe bounding box within the frame limits
-            cv::Rect handBox(pixelX, pixelY, pixelWidth, pixelHeight);
-            handBox &= cv::Rect(0, 0, frame.cols, frame.rows);
-            
-            // Draw a blue rectangle around the detected palm for visual confirmation
-            if (handBox.area() > 0) {
-                cv::rectangle(frame, handBox, cv::Scalar(255, 0, 0), 3);
+        cv::Mat handCrop = frame(nextBox);
+        
+        // ZÍTŘÍ: Changing processLandmarks to bool, so it returns false on low confidence.
+        m_isHandTracked = processLandmarks(handCrop, nextBox, frame.cols, frame.rows);
+        
+        // If confidence failed, make sure we break the tracking loop.
+        if (!m_isHandTracked) {
+            currentLandmarks.clear();
+            s_smoothedBox = cv::Rect(); // Reset smoother
+        }
+    } else {
+        // --- PHASE 1: HEAVY PALM DETECTION ---
+        // Runs only at startup or when the hand moves too fast and escapes the green tracking box.
+        
+        cv::Mat palmBlob = cv::dnn::blobFromImage(frame, 1.0 / 255.0, cv::Size(192, 192), cv::Scalar(), true, false);
+        palmNet.setInput(palmBlob);
+        
+        std::vector<cv::Mat> palmOutputs;
+        palmNet.forward(palmOutputs, palmNet.getUnconnectedOutLayersNames());
 
-                // Calculate the horizontal center normally
-                int centerX = handBox.x + handBox.width / 2;
+        currentLandmarks.clear();
+
+        if (!palmOutputs.empty()) {
+            int scoreTensorIndex = (palmOutputs[0].total() < palmOutputs[1].total()) ? 0 : 1;
+            cv::Mat scoreTensor = palmOutputs[scoreTensorIndex];
+            float* scores = scoreTensor.ptr<float>();
+            
+            int bestIndex = 0;
+            float maxScore = -1.0f;
+            
+            for (int i = 0; i < 2016; ++i) {
+                float currentScore = 1.0f / (1.0f + std::exp(-scores[i]));
+                if (currentScore > maxScore) {
+                    maxScore = currentScore;
+                    bestIndex = i;
+                }
+            }
+            
+            if (maxScore > 0.5f) {
+                int boxTensorIndex = (scoreTensorIndex == 0) ? 1 : 0;
+                cv::Mat boxTensor = palmOutputs[boxTensorIndex];
+                float* boxData = boxTensor.ptr<float>();
+                int dataOffset = bestIndex * 18;
                 
-                // Shift the vertical focal center UP by 30% of the box height.
-                // This targets the fingers directly instead of the wrist base.
-                int centerY = (handBox.y + handBox.height / 2) - static_cast<int>(handBox.height * 0.3f);
+                float dx = boxData[dataOffset];
+                float dy = boxData[dataOffset + 1];
+                float boxWidth = boxData[dataOffset + 2];
+                float boxHeight = boxData[dataOffset + 3];
+                
+                float centerX = (dx / 192.0f) + anchors[bestIndex].x;
+                float centerY = (dy / 192.0f) + anchors[bestIndex].y;
+                float width = boxWidth / 192.0f;
+                float height = boxHeight / 192.0f;
+                
+                int pixelX = static_cast<int>((centerX - width / 2.0f) * frame.cols);
+                int pixelY = static_cast<int>((centerY - height / 2.0f) * frame.rows);
+                int pixelWidth = static_cast<int>(width * frame.cols);
+                int pixelHeight = static_cast<int>(height * frame.rows);
+                
+                cv::Rect handBox(pixelX, pixelY, pixelWidth, pixelHeight);
+                handBox &= cv::Rect(0, 0, frame.cols, frame.rows);
+                
+                if (handBox.area() > 0) {
+                    int finalCenterX = handBox.x + handBox.width / 2;
+                    int finalCenterY = (handBox.y + handBox.height / 2) - static_cast<int>(handBox.height * 0.3f);
 
-                // Find the longest edge to maintain aspect ratio
-                int maxDimension = std::max(handBox.width, handBox.height);
+                    int maxDim = std::max(handBox.width, handBox.height);
+                    int squareSize = static_cast<int>(maxDim * m_cropMultiplier);
 
-                // Apply the dynamic crop multiplier from the UI
-                int squareSize = static_cast<int>(maxDimension * m_cropMultiplier);
+                    cv::Rect squareBox(
+                        finalCenterX - squareSize / 2,
+                        finalCenterY - squareSize / 2,
+                        squareSize,
+                        squareSize
+                    );
 
-                cv::Rect squareBox(
-                    centerX - squareSize / 2,
-                    centerY - squareSize / 2,
-                    squareSize,
-                    squareSize
-                );
+                    squareBox &= cv::Rect(0, 0, frame.cols, frame.rows);
 
-                // Ensure the new square does not cross the physical limits of the camera frame
-                squareBox &= cv::Rect(0, 0, frame.cols, frame.rows);
+                    if (squareBox.area() > 0) {
+                        // Drawing yellow rectangle
+                        cv::rectangle(frame, squareBox, cv::Scalar(0, 255, 255), 2);
 
-                // Proceed only if the crop area is geometrically valid
-                if (squareBox.area() > 0) {
-                    cv::rectangle(frame, squareBox, cv::Scalar(0, 255, 255), 2);
-
-                    cv::Mat handCrop = frame(squareBox);
-                    processLandmarks(handCrop, squareBox, frame.cols, frame.rows);
+                        cv::Mat handCrop = frame(squareBox);
+                        // Make processLandmarks void or handle return value. Making it void is easier to draft first.
+                        m_isHandTracked = processLandmarks(handCrop, squareBox, frame.cols, frame.rows);
+                        
+                        // Initialize s_smoothedBox from a good palm detect.
+                        if (m_isHandTracked) {
+                            s_smoothedBox = squareBox;
+                        }
+                    }
                 }
             }
         }
@@ -360,7 +465,7 @@ void GestureScanner::generateAnchors() {
     }
 }
 
-void GestureScanner::processLandmarks(const cv::Mat& crop, const cv::Rect& box, int frameWidth, int frameHeight) {
+bool GestureScanner::processLandmarks(const cv::Mat& crop, const cv::Rect& box, int frameWidth, int frameHeight) {
     // 1. Prepare and run the neural network
     cv::Mat blob = cv::dnn::blobFromImage(crop, 1.0 / 255.0, cv::Size(256, 256), cv::Scalar(), true, false);
     landmarkNet.setInput(blob);
@@ -369,16 +474,37 @@ void GestureScanner::processLandmarks(const cv::Mat& crop, const cv::Rect& box, 
     landmarkNet.forward(outputs, landmarkNet.getUnconnectedOutLayersNames());
 
     cv::Mat landmarkTensor;
+    float handScore = 0.0f;
+    bool hasScore = false;
     
-    // 2. Filter outputs to find the correct 2D image landmarks
+    // 2. Filter outputs to find BOTH the coordinates and the confidence score
     for (const auto& mat : outputs) {
         if (mat.total() == 63) {
             const float* data = mat.ptr<float>();
-            if (std::abs(data[0]) > 0.001f || std::abs(data[1]) > 0.001f) {
+            // 3D World Landmarks have the wrist (point 0) always at exactly 0.0, 0.0
+            // 2D Image Landmarks have real pixel coordinates (e.g., 128.0)
+            // This guarantees we drop the metric coordinates and keep only image pixels
+            if (std::abs(data[0]) > 1.0f || std::abs(data[1]) > 1.0f) {
                 landmarkTensor = mat;
-                break;
+            }
+        } else if (mat.total() == 1) {
+            float rawScore = mat.ptr<float>()[0];
+            float prob = (rawScore > 1.0f || rawScore < -1.0f) ? (1.0f / (1.0f + std::exp(-rawScore))) : rawScore;
+            
+            // The network returns two scores: hand presence confidence and handedness (left/right).
+            // We take the higher value so we don't accidentally discard a valid left hand.
+            if (prob > handScore) {
+                handScore = prob;
+                hasScore = true;
             }
         }
+    }
+
+    // STRICT FILTER: If the network is less than 75% confident, abort immediately
+    if (hasScore && handScore < 0.75f) {
+        // Prevent drawing the skeleton on random objects like faces or walls
+        currentLandmarks.clear(); 
+        return false;
     }
 
     if (!landmarkTensor.empty()) {
@@ -558,7 +684,7 @@ void GestureScanner::processLandmarks(const cv::Mat& crop, const cv::Rect& box, 
             bool isPalmOpen = isIndexFingerUp && isMiddleFingerUp && isRingFingerUp && isPinkyFingerUp && !isPhysicallyPinching;
             
             // Right-click gesture: Thumb is explicitly extended, Index is folded, others are folded (Thumbs-up shape)
-            bool isRightClickGesture = !isThumbFolded && !isIndexFingerUp && !isMiddleFingerUp && !isRingFingerUp && !isPinkyFingerUp;
+            bool isRightClickGesture = !isThumbFolded && !isIndexFingerUp && !isMiddleFingerUp && !isRingFingerUp && !isPinkyFingerUp && !isPhysicallyPinching;
             
             // --- SYSTEM PAUSE TOGGLE ---
             
@@ -692,9 +818,30 @@ void GestureScanner::processLandmarks(const cv::Mat& crop, const cv::Rect& box, 
                         }
                     }
                 }
+
+                // 5. MIDDLE CLICK PIPELINE
+                bool isMiddleClickGesture = isPinkyFingerUp && !isIndexFingerUp && !isMiddleFingerUp && !isRingFingerUp;
+                if (isMiddleClickGesture) {
+                    m_pinkyHoldFrames++;
+                    // Wait for 5 consecutive frames (approx 150ms) to confirm the user's intent
+                    if (m_pinkyHoldFrames >= 5 && !m_isMiddleClicked) {
+                        mouse->middleClick(true);
+                        m_isMiddleClicked = true;
+                    }
+                } else {
+                    // The most critical part: reset the counter instantly if the pose breaks
+                    m_pinkyHoldFrames = 0;
+                    if (m_isMiddleClicked) {
+                        mouse->middleClick(false);
+                        m_isMiddleClicked = false;
+                    }
+                }
+
             } // Konec exekučního bloku pro aktivní stav
         }
+        return true;
     } else {
-        std::cout << "Valid 2D landmark tensor not found." << std::endl;
+        std::cout << "Valid 2D landmark tensor not found. Hand lost." << std::endl;
+        return false;
     }
 }

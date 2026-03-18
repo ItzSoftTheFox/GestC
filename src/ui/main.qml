@@ -195,6 +195,20 @@ ApplicationWindow {
                     bottomPadding: 10
                 }
 
+                RowLayout {
+                    width: parent.width
+                    Text { 
+                        text: "GPU Akcelerace (OpenCL)" 
+                        color: "#a1a1aa" 
+                        font.pixelSize: 13 
+                    }
+                    Item { Layout.fillWidth: true }
+                    Switch {
+                        checked: scannerBackend.useGPU
+                        onCheckedChanged: scannerBackend.useGPU = checked
+                    }
+                }
+
                 component GlassSlider: Column {
                     property string labelText
                     property alias value: internalSlider.value

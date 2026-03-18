@@ -15,8 +15,10 @@ struct HandLandmark {
 
 class GestureScanner : public QObject {
     Q_OBJECT
-    Q_PROPERTY(bool isScanning READ isScanning NOTIFY isScanningChanged)
 
+    Q_PROPERTY(bool backlightCompensation READ backlightCompensation WRITE setBacklightCompensation NOTIFY backlightCompensationChanged)
+    Q_PROPERTY(bool useGPU READ useGPU WRITE setUseGPU NOTIFY useGPUChanged)
+    Q_PROPERTY(bool isScanning READ isScanning NOTIFY isScanningChanged)
     // Add this missing property to expose the pause state to QML
     Q_PROPERTY(bool isPaused READ isPaused NOTIFY isPausedChanged)
 
@@ -45,7 +47,8 @@ public:
 
     bool isScanning() const;
     bool isPaused() const;
-
+    bool useGPU() const;
+    
     // Getters for the calibration values
     float offsetX() const;
     float offsetY() const;
@@ -54,7 +57,7 @@ public:
     float smoothingFactor() const;
     float clickThreshold() const;
     float scrollSensitivity() const;
-
+    
     // Setters for the calibration values
     void setOffsetX(float value);
     void setOffsetY(float value);
@@ -63,7 +66,11 @@ public:
     void setSmoothingFactor(float value);
     void setClickThreshold(float value);
     void setScrollSensitivity(float value);
+    void setUseGPU(bool value);
 
+    bool backlightCompensation() const;
+    void setBacklightCompensation(bool value);
+    
 signals:
     void frameReady(const QImage &frame);
     void isScanningChanged();
@@ -77,7 +84,8 @@ signals:
     void clickThresholdChanged();
     void scrollSensitivityChanged();
     void isPausedChanged();
-
+    void useGPUChanged();
+    void backlightCompensationChanged();
 private slots:
     void processFrame();
 
@@ -106,12 +114,16 @@ private:
     float m_smoothedY;
     bool m_isFirstFrame;
 
+    bool m_backlightCompensation;
+    // CLICK
     bool m_isLeftClicked;
     float m_clickThreshold;
     bool m_isScanning;
     int m_releaseFrameCounter;
+    
+    bool m_isMiddleClicked;
+    int m_pinkyHoldFrames;
 
-    // Variables for right click state management
     bool m_isRightClicked;
     int m_rightReleaseFrameCounter;
 
@@ -127,10 +139,17 @@ private:
     int m_pauseCooldown;
     int m_pauseFrames;
 
+    //Hand Detection
+    bool m_isHandTracked;
+    cv::Rect m_lastHandBox;
+    int m_searchFrameCounter;
+
+
+    bool m_useGPU;
     void detectHand(cv::Mat& frame);
     void drawLandmarks(cv::Mat& frame);
     bool initModel();
-    void processLandmarks(const cv::Mat& crop, const cv::Rect& box, int frameWidth, int frameHeight);
+    bool processLandmarks(const cv::Mat& crop, const cv::Rect& box, int frameWidth, int frameHeight);
     
     void generateAnchors();
 };

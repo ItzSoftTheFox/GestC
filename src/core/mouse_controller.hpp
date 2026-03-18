@@ -14,6 +14,7 @@ public:
     void click(bool pressed);
     void scroll(int steps);
     void rightClick(bool isDown);
+    void middleClick(bool isDown);
 private:
     int fd;
     int screenW;
