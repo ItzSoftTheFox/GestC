@@ -1,300 +1,182 @@
-# HandMouse Pro
+# HandMouse
 
-![C++](https://img.shields.io/badge/C%2B%2B-17-blue?logo=cplusplus) ![Qt](https://img.shields.io/badge/Qt-6-green?logo=qt) ![License](https://img.shields.io/badge/License-MIT-orange) ![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20Windows-lightgrey)
+Lokální ovládání myši rukou přes webkameru pro Linux, včetně Hyprlandu / Waylandu.
+C++17, Qt 6 / QML, OpenCV DNN a přiložené MediaPipe modely. Bez cloudové služby,
+bez Python runtime a bez stahování závislostí při konfiguraci CMake.
 
-**Control your mouse pointer with hand gestures.** A lightweight, desktop application that leverages AI-powered hand tracking via webcam to enable intuitive gesture-based cursor control.
+## Spuštění
 
-## Features
+Na Arch Linuxu jsou potřeba `base-devel`, `cmake`, `ninja`, `qt6-base`,
+`qt6-declarative`, `qt6-wayland` a `opencv`. Qt alespoň 6.5 a OpenCV alespoň 4.9
+s podporou TFLite v DNN; ověřeno s Qt 6.11.2 a OpenCV 5.0.0.
 
-✨ **Real-time Hand Tracking**
-
-- Continuous webcam-based hand detection and landmark tracking using TensorFlow Lite and MediaPipe models
-- Optimized for low-latency performance on standard hardware
-
-🎨 **Modern Glassmorphism UI**
-
-- Real-time calibration panel with visual feedback
-- Adjustable sensitivity, dead zones, and coordinate offsets
-- Responsive Qt 6 QML interface with smooth animations
-
-🔧 **Multi-Platform Architecture**
-
-- Native platform API integration (Linux `/dev/uinput`, Windows `SendInput`)
-- Preprocessor-based platform abstraction for clean, maintainable code
-
-⚡ **High Performance**
-
-- Efficient C++17 implementation
-- Optimized OpenCV processing pipeline
-
-## Prerequisites
-
-### System Requirements
-
-#### Arch Linux
-
-```bash
-# Essential build tools
-sudo pacman -S base-devel cmake ninja
-
-# Graphics and UI
-sudo pacman -S qt6-base qt6-declarative libgl
-
-# Computer vision
-sudo pacman -S opencv
-
-# TensorFlow Lite (via AUR or local build)
-# Consider using mediapipe-cpp from AUR or building from source
-
-# Input device access
-sudo pacman -S libinput
+```sh
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j 4
+ctest --test-dir build --output-on-failure
+./build/GestC
 ```
 
-#### Debian/Ubuntu
+Aplikaci lze spustit z libovolného pracovního adresáře. QML je součástí binárky.
+Modely hledá vedle instalace v `share/handmouse/models`, v instalačním adresáři
+a nakonec v původním zdrojovém stromu. Vlastní umístění:
 
-```bash
-# Essential build tools
-sudo apt-get update
-sudo apt-get install build-essential cmake ninja-build
-
-# Graphics and UI
-sudo apt-get install qt6-base-dev qt6-declarative-dev libgl1-mesa-dev
-
-# Computer vision
-sudo apt-get install libopencv-dev
-
-# Input device access (Linux)
-sudo apt-get install libinput-dev
+```sh
+./build/GestC --model-dir /cesta/k/modelum
 ```
 
-#### Windows (Visual Studio 2022+)
+Volitelná instalace do uživatelského profilu:
 
-- **Visual Studio 2022** with C++ workload (MSVC compiler)
-- **CMake** (3.22+) – [Download](https://cmake.org/download/)
-- **Qt 6** – [Download](https://www.qt.io/download-qt-installer)
-- **OpenCV** – Pre-built binaries or build from source
-- **TensorFlow Lite** – MediaPipe C++ SDK
-
-### Dependencies
-
-| Dependency      | Version | Purpose              |
-| --------------- | ------- | -------------------- |
-| C++ Standard    | C++17   | Core language        |
-| CMake           | 3.22+   | Build system         |
-| Qt              | 6.0+    | UI framework         |
-| OpenCV          | 4.5+    | Image processing     |
-| TensorFlow Lite | Latest  | ML inference         |
-| MediaPipe       | Latest  | Hand tracking models |
-
-## Build Instructions
-
-### Linux (Arch/Debian)
-
-1. **Clone the repository**
-
-   ```bash
-   git clone https://github.com/yourusername/GestC.git
-   cd GestC
-   ```
-2. **Install dependencies** (see Prerequisites section)
-3. **Create build directory**
-
-   ```bash
-   mkdir -p build && cd build
-   ```
-4. **Configure with CMake**
-
-   ```bash
-   cmake -G Ninja -DCMAKE_BUILD_TYPE=Release ..
-   ```
-5. **Build the project**
-
-   ```bash
-   ninja
-   ```
-6. **Run the application**
-
-   ```bash
-   ./GestC
-   ```
-
-### Windows (Visual Studio)
-
-1. **Clone the repository**
-
-   ```bash
-   git clone https://github.com/yourusername/GestC.git
-   cd GestC
-   ```
-2. **Create build directory**
-
-   ```bash
-   mkdir build && cd build
-   ```
-3. **Configure with CMake**
-
-   ```bash
-   cmake -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release ..
-   ```
-4. **Build the project**
-
-   ```bash
-   cmake --build . --config Release
-   ```
-5. **Run the application**
-
-   ```bash
-   Release\GestC.exe
-   ```
-
-### macOS (Coming Soon)
-
-Full native support planned for future releases.
-
-## Post-Build Configuration
-
-### Linux: Setting up `/dev/uinput` Access (If needed)
-
-The application requires write access to `/dev/uinput` to control the mouse pointer. Follow these steps:
-
-1. **Check your user groups**
-
-   ```bash
-   groups $USER
-   ```
-2. **Add your user to the `input` group** (if not already present)
-
-   ```bash
-   sudo usermod -a -G input $USER
-   ```
-3. **Create/modify udev rules** (recommended for permanent access)
-
-   ```bash
-   sudo tee /etc/udev/rules.d/99-uinput.rules > /dev/null <<EOF
-   KERNEL=="uinput", MODE="0666", TAG+="uaccess"
-   EOF
-   ```
-4. **Reload udev rules**
-
-   ```bash
-   sudo udevadm control --reload-rules
-   sudo udevadm trigger
-   ```
-5. **Log out and log back in** (or restart) for group changes to take effect
-
-### Windows: No Additional Configuration Required
-
-Windows uses `SendInput` API which integrates directly with the Windows message queue. No additional setup is needed.
-
-## Usage
-
-### Running the Application
-
-1. **Start the application**
-
-   ```bash
-   ./GestC  # Linux
-   GestC.exe  # Windows
-   ```
-2. **Grant webcam permissions** (may be prompted by your OS)
-3. **Adjust calibration settings** in the glassmorphism UI panel:
-
-   - **Sensitivity**: Control cursor responsiveness to hand movement
-   - **Dead Zone**: Prevent drift when hand is stationary
-   - **X/Y Offsets**: Fine-tune cursor position mapping
-
-### Gesture Manual
-
-| Gesture                                   | Action            | Notes                                                                  |
-| ----------------------------------------- | ----------------- | ---------------------------------------------------------------------- |
-| **Open hand**                       | Move cursor       | Hand position maps to screen coordinates with configurable sensitivity |
-| **Pinch** (thumb + index)           | Left click & drag | Hold for drag-and-drop operations                                      |
-| **Pinch** (thumb + middle)          | Right click       | Single click with thumb and middle finger                              |
-| **Raised middle finger**            | Scroll            | Upward/downward motion scrolls; speed is proportional to finger height |
-| **Stop gesture** Full extended hand | Pause tracking    | Temporarily disable gesture recognition                                |
-
-### Tips for Best Results
-
-- **Lighting**: Ensure adequate, even lighting on your hand and face
-- **Distance**: Position camera 30-60cm away from your hand
-- **Contrast**: Avoid wearing colors similar to your skin tone
-- **Background**: Use a non-reflective background
-
-## Roadmap
-
-### ✅ Current (v0.3)
-
-- GPU Acceleration(Might not work for everyone)
-- Optimization of CPU usage
-- Added Gesture for scrollwheel button
-
-### 🔜 Planned
-
-- v0.4 Better and more friendly UI
-- v0.5 Introduction screen, with tutorial
-- v0.9 Setup wizzard for configuration + funny Gestures
-- v1.0 Full realase + Windows Support
-
-## Contributing
-
-We welcome contributions from the community! Whether it's bug reports, feature requests, or pull requests, your help makes this project better.
-
-### Getting Started
-
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/amazing-feature`
-3. Commit your changes: `git commit -m 'Add amazing feature'`
-4. Push to the branch: `git push origin feature/amazing-feature`
-5. Open a Pull Request
-
-### Code Style
-
-- Follow C++17 conventions
-- Use PascalCase for classes, camelCase for variables and methods
-- Document complex logic with inline comments
-- Ensure cross-platform compatibility
-
-### Reporting Issues
-
-- Use descriptive titles
-- Include your OS version, build type, and steps to reproduce
-- Attach relevant logs or screenshots
-- Specify your hardware setup (webcam model, resolution, etc.)
-
-### Development Setup
-
-```bash
-# Clone your fork
-git clone https://github.com/yourusername/GestC.git
-
-# Create a development branch
-git checkout -b develop
-
-# Build with debug symbols
-mkdir build-debug && cd build-debug
-cmake -DCMAKE_BUILD_TYPE=Debug ..
-ninja
+```sh
+cmake --install build --prefix "$HOME/.local"
 ```
 
-## License
+Pro spouštění příkazem `GestC` musí být `~/.local/bin` v `PATH`.
+Instalace obsahuje i položku pro nabídku aplikací.
 
-This project is licensed under the **MIT License** – see the [LICENSE](LICENSE) file for details.
+## První použití
 
-### Third-Party Licenses
+1. V **Nastavení** vyber kameru. Změna kamery zastaví aktuální snímání.
+2. V **Živém náhledu** spusť kameru. První spuštění používá **Pouze náhled**.
+3. Nech ruku celou v záběru, čelem ke kameře, s rovnoměrným osvětlením.
+   Ověř kresbu bodů ruky a text rozpoznaného gesta.
+4. Zapni **Ovládat kurzor**. Pokud chybí přístup k `/dev/uinput`, aplikace
+   zobrazí chybu; náhled lze dál používat bez oprávnění k ovládání myši.
+5. Nastav rychlost a vyhlazování podle sebe. Větší vyhlazování znamená
+   klidnější pohyb za cenu pomalejší odezvy.
 
-- **Qt 6**: LGPL v3 / Commercial
-- **OpenCV**: Apache 2 License
-- **TensorFlow Lite**: Apache 2 License
-- **MediaPipe**: Apache 2 License
+Obraz se neukládá ani neposílá po síti. Výběr režimu, kamery a ostatní nastavení
+se ukládají přes QSettings, obvykle do `~/.config/HandMouse/HandMouse.conf`.
+Kamera se při dalším spuštění sama nezapíná.
 
-## Acknowledgments
+## Gesta
 
-- **MediaPipe** for excellent hand-tracking models
-- **Qt Project** for the cross-platform UI framework
-- **OpenCV** for robust computer vision tools
+Implementace vychází z uživatelského zadání v [gesta.txt](gesta.txt).
 
----
+| Gesto | Akce |
+| --- | --- |
+| Rozevřená ruka | Relativní pohyb kurzoru |
+| Pěst | Scrollování od kotvy zachycené při sevření; nahoru/dolů podle posunu |
+| Palec + ukazováček | Krátký dotyk klikne; držený dotyk táhne |
+| Palec + malíček | Drží Super a levé tlačítko pro přesun okna |
+| Palec + prsteníček | Jedno kliknutí kolečkem; další až po oddělení prstů |
+| Jen prostředníček nahoře, ostatní schované | Po 0,5 s přepne pauzu; další přepnutí až po uvolnění gesta |
 
-**Questions?** Open an issue or start a discussion on GitHub.
+Dotyk prstů drž přibližně alespoň 70 ms. Ostatní prsty při něm nech volné;
+kompletně zavřená pěst má přednost jako scrollování. Přechody mezi gesty
+neposílají pohyb kurzoru. Pravý klik není součástí tohoto zadání.
 
-**Want to support this project?** Star ⭐ us on GitHub!
+Ztráta ruky, pauza, zastavení, změna nastavení nebo chyba vstupu uvolní tlačítka
+i Super. Při nedostatku nových snímků hlídá vstup časovač. Při opětovném
+zachycení ruky vznikne nový počátek pohybu, takže kurzor nepřeskočí.
+
+## Nastavení
+
+- **Rychlost kurzoru:** 0,2–3×; relativní pohyb funguje bez pevného rozlišení monitoru.
+- **Vyhlazování:** 0–100 %, časově řízený filtr nezávislý na frekvenci snímků.
+- **Rychlost scrollování:** rychlost roste se vzdáleností od kotvy; malý posun má mrtvou zónu.
+- **Kamera, zrcadlení a kresba bodů:** pro výběr a kontrolu obrazu.
+- **Citlivost dotyku prstů:** vzdálenost vztažená k velikosti dlaně, s hysterezí při držení.
+- **Jistota rozpoznání:** práh skutečné přítomnosti ruky, nikoli skóre levé/pravé ruky.
+- **Krytí skla:** 60–100 %; text a ovladače zůstávají neprůhledné.
+
+## Hyprland a skutečné sklo
+
+Okno používá skutečný alfa kanál a vrstvené průsvitné panely. Rozostření plochy
+za oknem provádí kompozitor; aplikace nepředstírá blur barevným obrázkem.
+Bez zapnutého blur v Hyprlandu bude pozadí průhledné, ale ostré. V jiných
+kompozitorech závisí blur na jejich podpoře. Nejde o nativní macOS Liquid Glass.
+
+Pro **Hyprland 0.55+** použij [docs/hyprland.lua](docs/hyprland.lua), ověřený
+parserem Hyprlandu 0.56.2. Nastav v něm cestu k `GestC` a načti jej na konci své
+konfigurace, po tématu / HyDE. Například při vývoji v tomto checkoutu:
+
+```lua
+-- V docs/hyprland.lua nejprve uprav local handmouse na cestu k build/GestC.
+dofile("/home/Fox/Projects/GestC/docs/hyprland.lua")
+```
+
+Doplněk nastavuje pravidla pouze pro okno `handmouse`. Celkové nastavení blur
+ponechává tématu; ukázka jeho zapnutí je v souboru zakomentovaná.
+Pro starší Hyprland **0.53–0.54** je připraven [docs/hyprland.conf](docs/hyprland.conf).
+Obě varianty nepoužívej současně. Existující vazbu Super + levé tlačítko
+neduplikuj; pokud už přesouvá okna, ponech ji.
+
+| Zkratka | Dosah | Akce |
+| --- | --- | --- |
+| Esc | Aktivní okno HandMouse | Zastavit kameru a uvolnit vstup |
+| Mezerník | Náhled / průvodce v HandMouse | Přepnout pauzu |
+| Ctrl+, | HandMouse | Otevřít nastavení |
+| Ctrl+Q | HandMouse | Ukončit aplikaci |
+| Super+Shift+F9 | Globální, po zapojení doplňku | Přepnout pauzu |
+| Super+Shift+F10 | Globální, po zapojení doplňku | Zastavit snímání |
+
+Globální zkratky používají lokální socket přístupný pouze stejnému uživateli:
+
+```sh
+./build/GestC --toggle-pause
+./build/GestC --stop
+```
+
+Zkontroluj případný konflikt F9/F10 se svými vazbami. Druhé běžné spuštění
+aktivuje existující instanci. Systémové nastavení rychlosti/akcelerace myši se
+uplatní i na virtuální myš `HandMouse Virtual Pointer`.
+
+Reference: [Hyprland vazby](https://wiki.hypr.land/Configuring/Basics/Binds/),
+[pravidla oken](https://wiki.hypr.land/Configuring/Basics/Window-Rules/).
+
+## Přístup ke vstupu
+
+Ovládání používá `/dev/uinput`, samostatnou virtuální myš a klávesnici pro Super.
+Aplikaci nespouštěj jako root. Pokud zařízení chybí, načti modul `uinput`.
+Pro přístup aktivního lokálního uživatele je připravené pravidlo
+[packaging/70-handmouse-uinput.rules](packaging/70-handmouse-uinput.rules).
+Instalace vyžaduje správcovská oprávnění:
+
+```sh
+sudo modprobe uinput
+sudo install -m 644 packaging/70-handmouse-uinput.rules /etc/udev/rules.d/70-handmouse-uinput.rules
+sudo udevadm control --reload-rules
+sudo udevadm trigger --subsystem-match=misc --sysname-match=uinput
+```
+
+Případně se odhlas a znovu přihlas. Pravidlo používá přístup aktivní session;
+neotvírá zařízení všem uživatelům pomocí `chmod 666`. Přístup ke kameře závisí
+na oprávnění `/dev/videoN` a na tom, zda ji právě nepoužívá jiný program.
+
+## Vývoj a ověřování
+
+```text
+src/app/       životní cyklus aplikace, nastavení, stav pro QML
+src/tracking/  pracovní vlákno kamery, detektor dlaně a bodů ruky
+src/gestures/  čisté vyhodnocení gest, časování, vyhlazování
+src/platform/  linuxový uinput, pořadí stisků a uvolnění
+src/ui/        QML obrazovky, sdílené ovladače, vykreslení videa
+tests/         gesta, vstup, nastavení, modely a opt-in test kamery
+docs/          Hyprland doplňky, architektura a omezení
+```
+
+Automatické testy neotevírají kameru ani skutečná vstupní zařízení. Ověřují
+časování gest, ztrátu ruky, pauzu, relativní pohyb, pořadí Super/klik,
+uvolnění při chybě, persistenci nastavení, oba modely a všechny stránky QML.
+
+Ruční test skutečné kamery, na pět sekund, bez systémového vstupu a ukládání obrazu:
+
+```sh
+./build/camera_check models 0
+```
+
+Test detekce a sledování na vlastním obrázku ruky:
+
+```sh
+./build/model_tests models /cesta/ruka.jpg
+```
+
+Tento obrazový test uloží anotovaný kontrolní snímek do `/tmp/handmouse-model-check.jpg`.
+Offscreen snímek rozhraní (nezachytí rozostření skutečné plochy kompozitorem):
+
+```sh
+QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software ./build/GestC --screenshot /tmp/handmouse.png --page settings
+```
+
+Technické podrobnosti a známá omezení jsou v [docs/architecture.md](docs/architecture.md).

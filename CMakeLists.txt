@@ -1,48 +1,60 @@
-cmake_minimum_required(VERSION 3.20)
-project(GestC VERSION 1.0)
-
+cmake_minimum_required(VERSION 3.22)
+project(HandMouse VERSION 0.4.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-find_package(Qt6 COMPONENTS Core Gui Qml Quick REQUIRED)
-
-# Změna: Vyžádáme si výhradně tyto tři specifické moduly OpenCV
-find_package(OpenCV REQUIRED COMPONENTS core videoio imgproc)
-
+set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_AUTOMOC ON)
-set(CMAKE_AUTORCC ON)
-
-add_executable(${PROJECT_NAME}
-    src/main.cpp
-    src/core/gesture_scanner.cpp
-    src/ui/video_item.cpp
-    src/core/mouse_controller.cpp
-)
-
-# Zapneme podporu pro stahování obsahu z internetu
-include(FetchContent)
-
-find_package(OpenCV REQUIRED COMPONENTS core videoio imgproc dnn)
-
-# Definujeme zdroj pro C++ knihovnu MediaPipe
-FetchContent_Declare(
-    mediapipe_cpp
-    GIT_REPOSITORY https://github.com/google/mediapipe.git
-    GIT_TAG        master
-
-    # Zabrání stahování historie repozitáře, stáhne jen špičku
-    GIT_SHALLOW    ON
-    # Zobrazí průběh stahování v terminálu, abys viděl práci na pozadí
-    GIT_PROGRESS   ON
-)
-
-# Provedeme stažení a zpřístupnění knihovny v projektu
-FetchContent_MakeAvailable(mediapipe_cpp)
-
-target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
-
-# CMake nyní automaticky vloží do proměnné OpenCV_LIBS pouze ty moduly, které jsme si vyžádali výše
-target_link_libraries(${PROJECT_NAME} PRIVATE
-    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick
-    ${OpenCV_LIBS}
-)
+include(GNUInstallDirs)
+include(CTest)
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    message(FATAL_ERROR "HandMouse currently supports Linux (Wayland / X11) through uinput.")
+endif()
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2 Network)
+find_package(OpenCV REQUIRED COMPONENTS core imgproc videoio dnn imgcodecs)
+if(OpenCV_VERSION VERSION_LESS 4.9)
+    message(FATAL_ERROR "OpenCV 4.9+ is required for the bundled TFLite models.")
+endif()
+add_library(gesture_engine src/gestures/gesture_engine.cpp)
+target_include_directories(gesture_engine PUBLIC src)
+add_library(hand_tracking src/tracking/hand_tracker.cpp)
+target_include_directories(hand_tracking PUBLIC src ${OpenCV_INCLUDE_DIRS})
+target_link_libraries(hand_tracking PUBLIC gesture_engine ${OpenCV_LIBS})
+add_executable(GestC src/main.cpp src/app/controller.cpp src/app/settings.cpp
+    src/tracking/camera_worker.cpp src/platform/input_device.cpp src/ui/video_item.cpp)
+target_link_libraries(GestC PRIVATE hand_tracking Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::Network)
+target_compile_definitions(GestC PRIVATE HANDMOUSE_SOURCE_MODELS="${CMAKE_CURRENT_SOURCE_DIR}/models"
+    HANDMOUSE_INSTALL_MODELS="${CMAKE_INSTALL_FULL_DATADIR}/handmouse/models")
+qt_add_resources(GestC "interface" PREFIX "/" FILES src/ui/main.qml
+    src/ui/components/GlassPanel.qml src/ui/components/ActionButton.qml
+    src/ui/components/SettingSlider.qml src/ui/components/SettingToggle.qml)
+foreach(target gesture_engine hand_tracking GestC)
+    target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
+endforeach()
+install(TARGETS GestC RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(FILES models/hand_detector.tflite models/hand_landmarks_detector.tflite DESTINATION ${CMAKE_INSTALL_DATADIR}/handmouse/models)
+install(FILES packaging/handmouse.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+if(BUILD_TESTING)
+    add_executable(ipc_tests tests/ipc_tests.cpp)
+    target_link_libraries(ipc_tests PRIVATE Qt6::Core Qt6::Network)
+    add_test(NAME ipc COMMAND ipc_tests $<TARGET_FILE:GestC>)
+    set_tests_properties(ipc PROPERTIES TIMEOUT 30)
+    add_executable(input_tests tests/input_tests.cpp src/platform/input_device.cpp)
+    target_link_libraries(input_tests PRIVATE gesture_engine Qt6::Core)
+    target_link_options(input_tests PRIVATE -Wl,--wrap=open -Wl,--wrap=write -Wl,--wrap=close -Wl,--wrap=ioctl)
+    add_test(NAME input COMMAND input_tests)
+    add_executable(settings_tests tests/settings_tests.cpp src/app/settings.cpp)
+    target_link_libraries(settings_tests PRIVATE gesture_engine Qt6::Core)
+    add_test(NAME settings COMMAND settings_tests)
+    add_executable(gesture_tests tests/gesture_tests.cpp)
+    target_link_libraries(gesture_tests PRIVATE gesture_engine)
+    add_test(NAME gestures COMMAND gesture_tests)
+    add_executable(camera_check tests/camera_check.cpp src/tracking/camera_worker.cpp)
+    target_link_libraries(camera_check PRIVATE hand_tracking Qt6::Core Qt6::Gui)
+    add_executable(model_tests tests/model_tests.cpp)
+    target_link_libraries(model_tests PRIVATE hand_tracking)
+    add_test(NAME models COMMAND model_tests "${CMAKE_CURRENT_SOURCE_DIR}/models")
+    foreach(page live settings gestures)
+        add_test(NAME ui_${page} COMMAND GestC --smoke-test --page ${page})
+        set_tests_properties(ui_${page} PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/test-config" TIMEOUT 20)
+    endforeach()
+endif()

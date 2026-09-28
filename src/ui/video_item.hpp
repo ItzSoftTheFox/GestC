@@ -1,32 +1,20 @@
 #pragma once
 #include <QQuickPaintedItem>
 #include <QImage>
-#include <QPainter>
-#include "../core/gesture_scanner.hpp"
+#include <QPointer>
+#include "app/controller.hpp"
 
-// Dědíme z třídy určené pro vlastní 2D kreslení v QML
 class VideoItem : public QQuickPaintedItem {
     Q_OBJECT
-    // Vytvoříme vlastnost, přes kterou QML předá odkaz na náš skener
-    Q_PROPERTY(GestureScanner* scanner READ scanner WRITE setScanner NOTIFY scannerChanged)
-
+    Q_PROPERTY(Controller* controller READ controller WRITE setController NOTIFY controllerChanged)
 public:
-    explicit VideoItem(QQuickItem *parent = nullptr);
-    
-    // Hlavní funkce pro kreslení na obrazovku
-    void paint(QPainter *painter) override;
-
-    GestureScanner* scanner() const;
-    void setScanner(GestureScanner* newScanner);
-
+    explicit VideoItem(QQuickItem* parent = nullptr);
+    void paint(QPainter* painter) override;
+    Controller* controller() const { return controller_; }
+    void setController(Controller* controller);
 signals:
-    void scannerChanged();
-
-public slots:
-    // Funkce, která přijme obrázek ze skeneru
-    void receiveFrame(const QImage &frame);
-
+    void controllerChanged();
 private:
-    QImage currentFrame;
-    GestureScanner* m_scanner;
+    QImage image_;
+    QPointer<Controller> controller_;
 };

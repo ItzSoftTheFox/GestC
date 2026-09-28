@@ -1,0 +1,14 @@
+Cela roztahla ruka = Pohyb mysi po plose
+
+Cela ruka se schovanymi prsty = scroll(styl je takovy ze v momente kdy zatne pest se udela kotva a podle toho jestli pak posune ruku nahoru ci dolu tam pojede scroll)
+
+malicek se dotyka palce a drzi= WIN/SUPER + levy klik
+
+ukazovacek se dotkne 1x palce = klik
+
+ukazovacek se dotkne palce a drzi = klik ktery drzi 
+
+prstenicek(ten co je vedle malicku) se dotkne palce = kliknuti kolecka 
+
+a kdyz bude prostrednicek jako jediny nahore a ostatni jsou schovane = stop/play pohybovani kurzoru 
+

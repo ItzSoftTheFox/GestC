@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=HandMouse
+Comment=Control the desktop with hand gestures
+Exec=GestC
+Icon=input-mouse
+Terminal=false
+Categories=Utility;Accessibility;
+StartupWMClass=handmouse

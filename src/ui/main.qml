@@ -1,318 +1,292 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import CustomElements 1.0
+import HandMouse 1.0
+import "components"
 
 ApplicationWindow {
+    id: window
+    property int page: 0
+    readonly property var controller: appController
+    readonly property var settings: appSettings
+    readonly property var preferences: settings.values
     visible: true
-    width: 1050
-    height: 650
-    // Prevent the user from shrinking the window too much
-    minimumWidth: 850
-    minimumHeight: 550
-    title: "HandMouse Pro"
-    
-    // Modern background with a subtle gradient
-    Rectangle {
-        anchors.fill: parent
+    width: 1160; height: 800
+    minimumWidth: 920; minimumHeight: 660
+    title: "HandMouse"
+    color: "transparent"
+    font.family: "Inter"
+    font.pixelSize: 14
+    background: Rectangle {
+        radius: 22
         gradient: Gradient {
-            GradientStop { position: 0.0; color: "#0f172a" }
-            GradientStop { position: 1.0; color: "#1e1b4b" }
+            GradientStop { position: 0; color: Qt.rgba(0.12, 0.18, 0.26, window.preferences.glassOpacity) }
+            GradientStop { position: 0.55; color: Qt.rgba(0.10, 0.14, 0.22, window.preferences.glassOpacity) }
+            GradientStop { position: 1; color: Qt.rgba(0.16, 0.14, 0.23, window.preferences.glassOpacity) }
         }
+        border.width: 1; border.color: "#35ffffff"
     }
+    Shortcut { sequence: "Escape"; onActivated: controller.stop() }
+    Shortcut { sequence: "Space"; enabled: window.page !== 1; onActivated: controller.togglePause() }
+    Shortcut { sequence: "Ctrl+,"; onActivated: window.page = 1 }
+    Shortcut { sequence: "Ctrl+Q"; onActivated: window.close() }
+    onClosing: controller.stop()
 
-    Shortcut {
-        sequence: "Esc"
-        onActivated: scannerBackend.stopCamera()
-    }
-    
-    Shortcut {
-        sequence: "Ctrl+Q"
-        onActivated: Qt.quit()
-    }
-
-    Shortcut {
-        sequence: "P"
-        onActivated: scannerBackend.togglePause()
-    }
-
-    // Main responsive grid container filling the entire window
     RowLayout {
-        anchors.fill: parent
-        anchors.margins: 30
-        spacing: 30
-
-        // Left section (Video and Controls) grows dynamically
+        anchors.fill: parent; anchors.margins: 20; spacing: 24
+        // Translucent sidebar: the compositor supplies the actual background blur.
+        GlassPanel {
+            Layout.preferredWidth: 204; Layout.fillHeight: true; tintOpacity: 0.055
+            ColumnLayout {
+                anchors.fill: parent; anchors.margins: 18; spacing: 10
+                Rectangle {
+                    Layout.topMargin: 10; width: 44; height: 44; radius: 15
+                    gradient: Gradient {
+                        GradientStop { position: 0; color: "#d1ebff" }
+                        GradientStop { position: 1; color: "#7ca3cf" }
+                    }
+                    Text { anchors.centerIn: parent; text: "H"; color: "#233b55"; font.pixelSize: 26; font.weight: Font.DemiBold }
+                }
+                Text { text: "HandMouse"; color: "#f0f6ff"; font.pixelSize: 23; font.weight: Font.DemiBold; Layout.topMargin: 6 }
+                Text { text: "Tvá ruka. Tvůj kurzor."; color: "#aabbd0"; font.pixelSize: 11 }
+                Item { Layout.preferredHeight: 28 }
+                Repeater {
+                    model: [{name: "Živý náhled", symbol: "◉"}, {name: "Nastavení", symbol: "⚙"}, {name: "Průvodce gesty", symbol: "✧"}]
+                    delegate: Button {
+                        id: nav
+                        required property var modelData
+                        required property int index
+                        Layout.fillWidth: true; implicitHeight: 44
+                        hoverEnabled: true
+                        onClicked: window.page = index
+                        Accessible.name: modelData.name
+                        background: Rectangle {
+                            radius: 11
+                            color: window.page === nav.index ? "#24c2dfff" : nav.hovered ? "#10ffffff" : "transparent"
+                            border.width: nav.activeFocus ? 1 : 0; border.color: "#b4deff"
+                        }
+                        contentItem: Row {
+                            spacing: 12; leftPadding: 12
+                            Text { text: nav.modelData.symbol; color: window.page === nav.index ? "#cae6ff" : "#aabbd0"; font.pixelSize: 18; anchors.verticalCenter: parent.verticalCenter }
+                            Text { text: nav.modelData.name; color: window.page === nav.index ? "#f0f6ff" : "#b4c2d3"; font.pixelSize: 13; anchors.verticalCenter: parent.verticalCenter }
+                        }
+                    }
+                }
+                Item { Layout.fillHeight: true }
+                Rectangle { Layout.fillWidth: true; height: 1; color: "#18ffffff" }
+                Text { text: hyprlandSession ? "●  Hyprland / Wayland" : "●  Linux"; color: "#b4d9cc"; font.pixelSize: 11; Layout.topMargin: 8 }
+                Text { text: "Zpracováno na tvém zařízení.\nObraz se nikam neposílá."; color: "#92a3b9"; font.pixelSize: 10; lineHeight: 1.5 }
+                Text { text: "HANDMOUSE  /  0.4"; color: "#74859d"; font.pixelSize: 9; font.letterSpacing: 1.8; Layout.topMargin: 12 }
+            }
+        }
         ColumnLayout {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            spacing: 25
-
-            // Flexible glass frame for the camera feed
+            Layout.fillWidth: true; Layout.fillHeight: true; spacing: 18
+            RowLayout {
+                Layout.fillWidth: true; Layout.topMargin: 12; spacing: 16
+                ColumnLayout {
+                    Layout.fillWidth: true; spacing: 7
+                    Text { text: ["Přirozeně v pohybu.", "Přesně podle tebe.", "Malá gesta. Velké možnosti."][window.page]; color: "#f3f7ff"; font.pixelSize: 28; font.weight: Font.DemiBold }
+                    Text { text: ["Ovládej plochu jednou rukou. Vlastním tempem.", "Nastavení se ukládá automaticky.", "Šest gest pro každodenní ovládání plochy."][window.page]; color: "#aebed2"; font.pixelSize: 13 }
+                }
+                Rectangle {
+                    implicitWidth: badge.implicitWidth + 24; implicitHeight: 30; radius: 15
+                    color: controller.running && !controller.paused ? "#203ecf9b" : "#16ffffff"
+                    border.width: 1; border.color: "#22ffffff"
+                    Text { id: badge; anchors.centerIn: parent; text: controller.busy ? "Připravuji…" : controller.paused ? "Pozastaveno" : controller.running ? "●  Aktivní" : "Připraveno"; color: controller.running && !controller.paused ? "#9ce4c8" : "#c3cedd"; font.pixelSize: 11 }
+                }
+            }
             Rectangle {
                 Layout.fillWidth: true
-                Layout.fillHeight: true
-                color: Qt.rgba(1, 1, 1, 0.03)
-                border.color: Qt.rgba(1, 1, 1, 0.1)
-                border.width: 1
-                radius: 8
-
-                // Wrapper item to perfectly align the video and the overlay on top of each other
-                Item {
-                    anchors.fill: parent
-                    anchors.margins: 10
-
-                    VideoItem {
-                        anchors.fill: parent
-                        scanner: scannerBackend
-                    }
-
-                    // Dark overlay indicating the paused state
-                    Rectangle {
-                        anchors.fill: parent
-                        anchors.margins: 10
-                        color: Qt.rgba(0, 0, 0, 0.7)
-                        radius: 6
-                        // Require BOTH the system to be paused AND the camera to be actively scanning
-                        visible: scannerBackend.isPaused && scannerBackend.isScanning
-                        
-                        Text {
-                            anchors.centerIn: parent
-                            text: "PAUZNUTO"
-                            color: "white"
-                            font.pixelSize: 42
-                            font.bold: true
-                            font.letterSpacing: 6
-                        }
-                    }
-                }
-            }
-
-            // Control bar centered at the bottom
-            RowLayout {
-                Layout.alignment: Qt.AlignHCenter
-                spacing: 20
-
-                Button {
-                    text: "Start"
-                    Layout.preferredWidth: 120
-                    Layout.preferredHeight: 40
-                    onClicked: scannerBackend.startCamera()
-                    background: Rectangle {
-                        color: parent.pressed ? Qt.rgba(1, 1, 1, 0.1) : Qt.rgba(1, 1, 1, 0.05)
-                        border.color: Qt.rgba(1, 1, 1, 0.15)
-                        radius: 6
-                    }
-                    contentItem: Text {
-                        text: parent.text
-                        color: "white"
-                        font.pixelSize: 15
-                        font.bold: true
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                    }
-                }
-
-                Button {
-                    text: "Stop"
-                    Layout.preferredWidth: 120
-                    Layout.preferredHeight: 40
-                    onClicked: scannerBackend.stopCamera()
-                    background: Rectangle {
-                        color: parent.pressed ? Qt.rgba(1, 1, 1, 0.1) : Qt.rgba(1, 1, 1, 0.05)
-                        border.color: Qt.rgba(1, 1, 1, 0.15)
-                        radius: 6
-                    }
-                    contentItem: Text {
-                        text: parent.text
-                        color: "white"
-                        font.pixelSize: 15
-                        font.bold: true
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                    }
-                }
-
-                // Status indicator
-                Rectangle {
-                    Layout.preferredWidth: 140
-                    Layout.preferredHeight: 40
-                    radius: 6
-                    color: Qt.rgba(0, 0, 0, 0.2)
-                    border.color: Qt.rgba(1, 1, 1, 0.05)
-                    
-                    Row {
-                        anchors.centerIn: parent
-                        spacing: 10
-                        Rectangle {
-                            width: 12
-                            height: 12
-                            radius: 6
-                            anchors.verticalCenter: parent.verticalCenter
-                            color: scannerBackend.isScanning ? "#32d74b" : "#ff453a"
-                            Behavior on color { ColorAnimation { duration: 300 } }
-                            
-                            Rectangle {
-                                anchors.centerIn: parent
-                                width: 20
-                                height: 20
-                                radius: 10
-                                color: parent.color
-                                opacity: 0.3
-                            }
-                        }
-                        Text {
-                            text: scannerBackend.isScanning ? "Aktivní" : "Zastaveno"
-                            color: "white"
-                            font.pixelSize: 14
-                            anchors.verticalCenter: parent.verticalCenter
-                        }
-                    }
-                }
-            }
-        }
-
-        // Right glass panel for calibration retains fixed width but fills height
-        Rectangle {
-            Layout.preferredWidth: 320
-            Layout.fillHeight: true
-            
-            color: Qt.rgba(1, 1, 1, 0.04)
-            border.color: Qt.rgba(1, 1, 1, 0.12)
-            border.width: 1
-            radius: 8
-
-            Column {
-                anchors.fill: parent
-                anchors.margins: 25
-                spacing: 20
-
-                Text { 
-                    text: "Kalibrace Modelu" 
-                    color: "white" 
-                    font.pixelSize: 20
-                    font.bold: true
-                    bottomPadding: 10
-                }
-
+                implicitHeight: errorRow.implicitHeight + 24
+                visible: controller.error.length > 0
+                color: "#30b77947"; radius: 12; border.color: "#60e7b386"
                 RowLayout {
-                    width: parent.width
-                    Text { 
-                        text: "GPU Akcelerace (OpenCL)" 
-                        color: "#a1a1aa" 
-                        font.pixelSize: 13 
-                    }
-                    Item { Layout.fillWidth: true }
-                    Switch {
-                        checked: scannerBackend.useGPU
-                        onCheckedChanged: scannerBackend.useGPU = checked
-                    }
+                    id: errorRow
+                    anchors.fill: parent; anchors.margins: 12
+                    Text { Layout.fillWidth: true; text: controller.error; color: "#ffe0be"; font.pixelSize: 12; wrapMode: Text.Wrap; textFormat: Text.PlainText }
+                    ActionButton { text: "Zavřít"; compact: true; onClicked: controller.clearError() }
                 }
-
-                component GlassSlider: Column {
-                    property string labelText
-                    property alias value: internalSlider.value
-                    property alias from: internalSlider.from
-                    property alias to: internalSlider.to
-                    property int decimals: 2
-                    
-                    width: parent.width
-                    spacing: 8
-
-                    RowLayout {
-                        width: parent.width
-                        Text { text: labelText; color: "#a1a1aa"; font.pixelSize: 13 }
-                        Item { Layout.fillWidth: true }
-                        Text { text: internalSlider.value.toFixed(decimals); color: "white"; font.pixelSize: 13; font.bold: true }
-                    }
-
-                    Slider {
-                        id: internalSlider
-                        width: parent.width
-                        
-                        background: Rectangle {
-                            x: internalSlider.leftPadding
-                            y: internalSlider.topPadding + internalSlider.availableHeight / 2 - height / 2
-                            implicitWidth: 200
-                            implicitHeight: 6
-                            width: internalSlider.availableWidth
-                            height: implicitHeight
-                            radius: 3
-                            color: Qt.rgba(1, 1, 1, 0.1)
-
+            }
+            StackLayout {
+                currentIndex: window.page
+                Layout.fillWidth: true; Layout.fillHeight: true
+                ColumnLayout {
+                    spacing: 14
+                    GlassPanel {
+                        Layout.fillWidth: true; Layout.fillHeight: true; Layout.minimumHeight: 270
+                        tintOpacity: 0.04; clip: true
+                        Rectangle { anchors.fill: parent; anchors.margins: 1; radius: 21; color: "#650b1522" }
+                        VideoItem { anchors.fill: parent; anchors.margins: 12; controller: window.controller; visible: controller.running }
+                        ColumnLayout {
+                            anchors.centerIn: parent; spacing: 14; visible: !controller.running
                             Rectangle {
-                                width: internalSlider.visualPosition * parent.width
-                                height: parent.height
-                                color: "#0a84ff"
-                                radius: 3
+                                Layout.alignment: Qt.AlignHCenter; width: 76; height: 76; radius: 26; color: "#12d5eaff"; border.color: "#24d5eaff"
+                                Text { anchors.centerIn: parent; text: "◉"; color: "#b5d3f2"; font.pixelSize: 38 }
+                            }
+                            Text { Layout.alignment: Qt.AlignHCenter; text: controller.busy ? "Připravuji snímání" : "Prostor pro tvou ruku"; color: "#e4edf9"; font.pixelSize: 21; font.weight: Font.Medium }
+                            Text { Layout.alignment: Qt.AlignHCenter; text: "Postav kameru před sebe a nech ruku v záběru.\nZačni náhledem a vyzkoušej jednotlivá gesta."; horizontalAlignment: Text.AlignHCenter; lineHeight: 1.5; color: "#9dadc2"; font.pixelSize: 12 }
+                        }
+                        Rectangle {
+                            anchors.fill: parent; anchors.margins: 1; radius: 21; visible: controller.running && controller.paused; color: "#880a1423"
+                            Column {
+                                anchors.centerIn: parent; spacing: 10
+                                Text { anchors.horizontalCenter: parent.horizontalCenter; text: "Pozastaveno"; color: "#f1f6ff"; font.pixelSize: 28; font.weight: Font.Medium }
+                                Text { anchors.horizontalCenter: parent.horizontalCenter; text: "Prostředníček nebo tlačítko Pokračovat"; color: "#c0d0e2"; font.pixelSize: 12 }
                             }
                         }
-                        
-                        handle: Rectangle {
-                            x: internalSlider.leftPadding + internalSlider.visualPosition * (internalSlider.availableWidth - width)
-                            y: internalSlider.topPadding + internalSlider.availableHeight / 2 - height / 2
-                            implicitWidth: 16
-                            implicitHeight: 16
-                            radius: 4
-                            color: internalSlider.pressed ? "#d1d5db" : "#ffffff"
-                            border.color: Qt.rgba(0, 0, 0, 0.1)
-                            border.width: 1
+                        Rectangle {
+                            anchors.top: parent.top; anchors.left: parent.left; anchors.margins: 18
+                            width: previewLabel.implicitWidth + 24; height: 28; radius: 14; color: "#a51a2639"; border.color: "#25ffffff"
+                            Text { id: previewLabel; anchors.centerIn: parent; text: window.preferences.previewOnly ? "POUZE NÁHLED" : "OVLÁDÁNÍ KURZORU"; color: "#d9e7f7"; font.pixelSize: 9; font.letterSpacing: 1.2 }
+                        }
+                        Rectangle {
+                            anchors.bottom: parent.bottom; anchors.horizontalCenter: parent.horizontalCenter; anchors.bottomMargin: 18
+                            width: statusLabel.implicitWidth + 32; height: 34; radius: 17; color: "#ca172333"; visible: controller.running
+                            Text { id: statusLabel; anchors.centerIn: parent; text: controller.status; color: "#e2f0ff"; font.pixelSize: 12 }
                         }
                     }
+                    RowLayout {
+                        Layout.fillWidth: true; spacing: 12
+                        Repeater {
+                            model: [
+                                {label: "SNÍMÁNÍ", value: controller.running ? controller.fps.toFixed(0) + " fps" : "—"},
+                                {label: "ZPRACOVÁNÍ", value: controller.running ? controller.inferenceMs.toFixed(0) + " ms" : "—"},
+                                {label: "RUKA V ZÁBĚRU", value: controller.handVisible ? (controller.confidence * 100).toFixed(0) + " %" : "—"}
+                            ]
+                            delegate: GlassPanel {
+                                required property var modelData
+                                Layout.fillWidth: true; implicitHeight: 70; radius: 14; tintOpacity: 0.045
+                                Column { anchors.left: parent.left; anchors.leftMargin: 16; anchors.verticalCenter: parent.verticalCenter; spacing: 7
+                                    Text { text: modelData.label; color: "#9badc3"; font.pixelSize: 9; font.letterSpacing: 1.2 }
+                                    Text { text: modelData.value; color: "#e4eefb"; font.pixelSize: 18; font.weight: Font.Medium }
+                                }
+                            }
+                        }
+                    }
+                    GlassPanel {
+                        Layout.fillWidth: true; implicitHeight: 77; radius: 16; tintOpacity: 0.06
+                        RowLayout {
+                            anchors.fill: parent; anchors.margins: 15; spacing: 10
+                            ActionButton { text: controller.running ? "Zastavit" : "Spustit kameru"; primary: !controller.running; enabled: !controller.busy; onClicked: controller.running ? controller.stop() : controller.start() }
+                            ActionButton { text: controller.paused ? "Pokračovat" : "Pozastavit"; enabled: controller.running; onClicked: controller.togglePause() }
+                            Item { Layout.fillWidth: true }
+                            SettingToggle { title: "Ovládat kurzor"; description: ""; checked: !window.preferences.previewOnly; onToggled: function(value) { settings.setValue("previewOnly", !value) } }
+                        }
+                    }
+                    Text { text: "Esc zastaví kameru  ·  Mezerník přepne pauzu  ·  Globální zkratky najdeš v průvodci"; color: "#93a5bd"; font.pixelSize: 10; Layout.alignment: Qt.AlignHCenter; Layout.bottomMargin: 6 }
                 }
-
-                GlassSlider {
-                    labelText: "Osa X (Posun)"
-                    from: -0.2; to: 0.2
-                    value: scannerBackend.offsetX
-                    onValueChanged: scannerBackend.offsetX = value
+                ScrollView {
+                    id: settingsScroll
+                    clip: true
+                    contentWidth: availableWidth
+                    ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                    ColumnLayout {
+                        width: settingsScroll.availableWidth; spacing: 16
+                        GlassPanel {
+                            Layout.fillWidth: true; implicitHeight: cursorSettings.implicitHeight + 40
+                            ColumnLayout {
+                                id: cursorSettings
+                                anchors.fill: parent; anchors.margins: 20; spacing: 18
+                                Text { text: "Kurzor a scrollování"; color: "#f0f5fd"; font.pixelSize: 17; font.weight: Font.DemiBold }
+                                SettingSlider { Layout.fillWidth: true; title: "Rychlost kurzoru"; description: "Kolik pohybu na ploše udělá malý pohyb ruky."; from: 0.2; to: 3; value: window.preferences.speed; displayValue: value.toFixed(1) + "×"; onEdited: function(v) { settings.setValue("speed", v) } }
+                                SettingSlider { Layout.fillWidth: true; title: "Vyhlazování pohybu"; description: "Méně = rychlá odezva. Více = klidnější kurzor."; value: window.preferences.smoothing; displayValue: Math.round(value * 100) + " %"; onEdited: function(v) { settings.setValue("smoothing", v) } }
+                                SettingSlider { Layout.fillWidth: true; title: "Rychlost scrollování"; description: "Sevři pěst a posuň ji nahoru nebo dolů od výchozí polohy."; from: 2; to: 30; stepSize: 1; value: window.preferences.scrollSpeed; displayValue: value.toFixed(0); onEdited: function(v) { settings.setValue("scrollSpeed", v) } }
+                            }
+                        }
+                        GlassPanel {
+                            Layout.fillWidth: true; implicitHeight: cameraSettings.implicitHeight + 40
+                            ColumnLayout {
+                                id: cameraSettings; anchors.fill: parent; anchors.margins: 20; spacing: 18
+                                Text { text: "Kamera a rozpoznávání"; color: "#f0f5fd"; font.pixelSize: 17; font.weight: Font.DemiBold }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    ComboBox {
+                                        id: cameraPicker
+                                        Layout.fillWidth: true
+                                        model: controller.cameras; textRole: "label"; valueRole: "index"
+                                        currentIndex: {
+                                            const choices = controller.cameras
+                                            for (let i = 0; i < choices.length; ++i)
+                                                if (choices[i].index === window.preferences.camera) return i
+                                            return -1
+                                        }
+                                        displayText: count === 0 ? "Žádná kamera — připoj ji a obnov seznam" : currentIndex < 0 ? "Vyber kameru" : currentText
+                                        onActivated: settings.setValue("camera", currentValue)
+                                        Accessible.name: "Kamera"
+                                        palette.buttonText: "#edf3fb"; palette.button: "#344457"; palette.text: "#edf3fb"; palette.base: "#243346"; palette.highlight: "#466382"
+                                    }
+                                    ActionButton { text: "Obnovit"; compact: true; onClicked: controller.refreshCameras() }
+                                }
+                                Text { text: "Změna kamery zastaví snímání. Potom ji znovu spusť."; color: "#9badc3"; font.pixelSize: 11 }
+                                SettingToggle { Layout.fillWidth: true; title: "Zrcadlit obraz"; description: "Ruka se pohybuje stejným směrem jako kurzor."; checked: window.preferences.mirror; onToggled: function(v) { settings.setValue("mirror", v) } }
+                                SettingToggle { Layout.fillWidth: true; title: "Zobrazit body ruky"; description: "Pomocná kresba pro kontrolu rozpoznávání."; checked: window.preferences.skeleton; onToggled: function(v) { settings.setValue("skeleton", v) } }
+                                SettingSlider { Layout.fillWidth: true; title: "Citlivost dotyku prstů"; description: "Vyšší hodnota dovolí větší mezeru mezi prsty."; from: 0.15; to: 0.6; value: window.preferences.pinchThreshold; displayValue: value.toFixed(2); onEdited: function(v) { settings.setValue("pinchThreshold", v) } }
+                                SettingSlider { Layout.fillWidth: true; title: "Jistota rozpoznání"; description: "Vyšší hodnota odmítne nejisté detekce, ale potřebuje lepší světlo."; from: 0.5; to: 0.9; value: window.preferences.confidence; displayValue: Math.round(value * 100) + " %"; onEdited: function(v) { settings.setValue("confidence", v) } }
+                            }
+                        }
+                        GlassPanel {
+                            Layout.fillWidth: true; implicitHeight: appearanceSettings.implicitHeight + 40
+                            ColumnLayout {
+                                id: appearanceSettings; anchors.fill: parent; anchors.margins: 20; spacing: 16
+                                Text { text: "Vzhled"; color: "#f0f5fd"; font.pixelSize: 17; font.weight: Font.DemiBold }
+                                SettingSlider { Layout.fillWidth: true; title: "Krytí skla"; description: "Skutečné rozostření pozadí zajišťuje Hyprland. Při horší čitelnosti zvyš krytí."; from: 0.6; to: 1; value: window.preferences.glassOpacity; displayValue: Math.round(value * 100) + " %"; onEdited: function(v) { settings.setValue("glassOpacity", v) } }
+                            }
+                        }
+                        ActionButton { text: "Obnovit výchozí nastavení"; onClicked: resetDialog.open(); Layout.bottomMargin: 16 }
+                    }
                 }
-
-                GlassSlider {
-                    labelText: "Osa Y (Posun)"
-                    from: -0.2; to: 0.2
-                    value: scannerBackend.offsetY
-                    onValueChanged: scannerBackend.offsetY = value
-                }
-
-                GlassSlider {
-                    labelText: "Velikost výřezu"
-                    from: 1.0; to: 3.5
-                    value: scannerBackend.cropMultiplier
-                    onValueChanged: scannerBackend.cropMultiplier = value
-                }
-
-                GlassSlider {
-                    labelText: "Citlivost pohybu"
-                    from: 1.0; to: 4.0
-                    value: scannerBackend.movementScale
-                    onValueChanged: scannerBackend.movementScale = value
-                }
-
-                GlassSlider {
-                    labelText: "Vyhlazování pohybu"
-                    from: 0.05; to: 1.0
-                    value: scannerBackend.smoothingFactor
-                    onValueChanged: scannerBackend.smoothingFactor = value
-                }
-
-                GlassSlider {
-                    labelText: "Práh kliknutí"
-                    from: 0.05; to: 0.30
-                    decimals: 3
-                    value: scannerBackend.clickThreshold
-                    onValueChanged: scannerBackend.clickThreshold = value
-                }
-                
-                GlassSlider {
-                    labelText: "Rychlost scrollování"
-                    // 5.0 is slow precision scrolling. 30.0 is extremely fast.
-                    from: 5.0; to: 30.0
-                    decimals: 1
-                    value: scannerBackend.scrollSensitivity
-                    onValueChanged: scannerBackend.scrollSensitivity = value
+                ScrollView {
+                    id: guideScroll
+                    clip: true; contentWidth: availableWidth
+                    ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                    ColumnLayout {
+                        width: guideScroll.availableWidth; spacing: 12
+                        Repeater {
+                            model: [
+                                {number: "01", title: "Otevřená ruka", detail: "Roztáhni prsty a pohybuj rukou. Kurzor sleduje pohyb dlaně. Při změně gesta nepřeskočí."},
+                                {number: "02", title: "Pěst → scrollování", detail: "Sevřením pěsti vznikne kotva. Nad ní scrolluješ nahoru, pod ní dolů. Čím dál od kotvy, tím rychleji."},
+                                {number: "03", title: "Palec + ukazováček → klik / tažení", detail: "Krátce spoj prsty pro kliknutí. Drž je spojené a pohybuj rukou pro přetahování."},
+                                {number: "04", title: "Palec + malíček → Super + tažení", detail: "Držením dotyku přesouvej okna v Hyprlandu. Vyžaduje vazbu SUPER + levé tlačítko na přesouvání oken."},
+                                {number: "05", title: "Palec + prsteníček → kolečko", detail: "Spoj prsty pro jedno kliknutí prostředním tlačítkem. Před dalším kliknutím je odděl."},
+                                {number: "06", title: "Samotný prostředníček → pauza", detail: "Ostatní prsty schovej a gesto podrž půl sekundy. Stejným gestem ovládání opět zapneš."}
+                            ]
+                            delegate: GlassPanel {
+                                required property var modelData
+                                Layout.fillWidth: true; implicitHeight: gestureRow.implicitHeight + 30; radius: 16; tintOpacity: 0.055
+                                RowLayout {
+                                    id: gestureRow; anchors.fill: parent; anchors.margins: 15; spacing: 16
+                                    Text { text: modelData.number; color: "#95bbdd"; font.pixelSize: 21; font.weight: Font.Light; Layout.preferredWidth: 32 }
+                                    ColumnLayout {
+                                        Layout.fillWidth: true; spacing: 7
+                                        Text { text: modelData.title; color: "#edf4ff"; font.pixelSize: 14; font.weight: Font.Medium; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                                        Text { text: modelData.detail; color: "#a9bbd0"; font.pixelSize: 12; wrapMode: Text.Wrap; Layout.fillWidth: true; lineHeight: 1.3 }
+                                    }
+                                }
+                            }
+                        }
+                        Text { Layout.fillWidth: true; text: "Začni v režimu Pouze náhled. Gesta drž čelem ke kameře; při dotyku dvou prstů nech ostatní volné. Při ztrátě ruky se myš i Super automaticky uvolní."; color: "#aebed2"; font.pixelSize: 12; wrapMode: Text.Wrap; lineHeight: 1.5 }
+                        GlassPanel {
+                            Layout.fillWidth: true; implicitHeight: shortcuts.implicitHeight + 32; radius: 16
+                            ColumnLayout {
+                                id: shortcuts; anchors.fill: parent; anchors.margins: 16; spacing: 8
+                                Text { text: "Zkratky i mimo okno aplikace"; color: "#edf4ff"; font.pixelSize: 14 }
+                                Text { Layout.fillWidth: true; text: "V docs/hyprland.lua je připravené Super + Shift + F9 pro pauzu a Super + Shift + F10 pro zastavení. Nejprve je přidej do konfigurace Hyprlandu podle README."; color: "#a9bbd0"; font.pixelSize: 12; wrapMode: Text.Wrap; lineHeight: 1.4 }
+                            }
+                        }
+                        Item { height: 12 }
+                    }
                 }
             }
         }
+    }
+    Dialog {
+        id: resetDialog
+        anchors.centerIn: parent
+        title: "Obnovit nastavení?"
+        modal: true
+        standardButtons: Dialog.Reset | Dialog.Cancel
+        onReset: { settings.reset(); close() }
+        palette.window: "#233145"; palette.windowText: "#edf3fb"; palette.text: "#edf3fb"; palette.button: "#34465c"; palette.buttonText: "#edf3fb"
+        Label { text: "Vrátí rychlost, gesta, kameru a vzhled na výchozí hodnoty."; color: "#c1d0e0" }
     }
 }

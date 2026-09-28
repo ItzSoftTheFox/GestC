@@ -1,0 +1,2 @@
+# Active local session only; must sort before 73-seat-late.rules.
+SUBSYSTEM=="misc", KERNEL=="uinput", TAG+="uaccess", OPTIONS+="static_node=uinput"
