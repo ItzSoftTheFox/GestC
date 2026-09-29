@@ -43,8 +43,11 @@ int main() {
         require(!result.left && !result.super, "hand loss releases buttons");
         engine.update(pinch, .32, settings);
         result = engine.update(pinch, .40, settings);
-        require(result.left && result.dx == 0, "reacquisition starts without jump");
-        result = engine.update(pinch, 1.0, settings);
+        require(!result.left && result.dx == 0 && result.safetyBlocked, "loss requires open palm before reacquisition");
+        engine.update(open, .44, settings); engine.update(open, .68, settings);
+        engine.update(pinch, .72, settings);
+        require(engine.update(pinch, .80, settings).left, "open palm rearms a later deliberate drag");
+        result = engine.update(pinch, 1.2, settings);
         require(!result.left, "stale frame gap releases drag");
         auto super = makeHand(Pose::SuperDrag);
         engine.reset(); engine.update(super, 0, settings);
@@ -86,6 +89,71 @@ int main() {
             return sum;
         };
         require(std::abs(motion(30) - motion(60)) < 0.1, "smoothing independent of frame rate");
+        for (int hz : {15, 30, 60}) {
+            const double dt = 1.0 / hz;
+            for (Pose pose : {Pose::LeftDrag, Pose::SuperDrag}) {
+                GestureEngine e;
+                const auto h = makeHand(pose);
+                for (int i = 0; i <= hz / 2; ++i) result = e.update(h, i * dt, settings);
+                require(result.left && result.super == (pose == Pose::SuperDrag), "drag at each camera rate");
+                result = e.update(std::nullopt, .5 + dt, settings);
+                require(!result.left && !result.super, "loss releases drag at each rate");
+            }
+            GestureEngine e;
+            int clicks = 0;
+            for (int i = 0; i <= hz; ++i) clicks += e.update(middle, i * dt, settings).middleClick;
+            require(clicks == 1, "middle click does not repeat at any frame rate");
+            e.reset();
+            for (int i = 0; i <= hz; ++i) result = e.update(pause, i * dt, settings);
+            require(result.paused, "pause hold works at each frame rate");
+            for (int i = hz + 1; i <= 2 * hz; ++i) result = e.update(pause, i * dt, settings);
+            require(result.paused, "pause remains latched at each frame rate");
+            e.setPaused(false); e.reset();
+            for (int i = 0; i <= hz; ++i) {
+                result = e.update(fist, i * dt, settings);
+                require(result.scroll == 0, "stationary scroll anchor at each frame rate");
+            }
+            int scroll = 0;
+            for (int i = 1; i <= hz; ++i) scroll += e.update(shifted(fist, 0, -.1), 1 + i * dt, settings).scroll;
+            require(scroll > 0, "scroll movement at each frame rate");
+        }
+        const auto noInput = [](const Command& c) {
+            return c.dx == 0 && c.dy == 0 && c.scroll == 0 && !c.left && !c.super && !c.middleClick;
+        };
+        for (int hz : {15, 30, 60}) {
+            GestureEngine e; double t = 0; const double dt = 1.0 / hz;
+            for (int i = 0; i < hz / 2; ++i) { e.update(fist, t, settings); t += dt; }
+            result = e.update(std::nullopt, t, settings); t += dt;
+            require(result.safetyBlocked && noInput(result), "lost fist immediately blocks all input");
+            for (int i = 0; i < hz; ++i) {
+                result = e.update(shifted(fist, 0, -.15), t, settings); t += dt;
+                require(result.safetyBlocked && noInput(result), "fist reacquisition cannot restart scroll at a new anchor");
+            }
+            for (int i = 0; i < hz; ++i) {
+                result = e.update(shifted(open, i % 2 ? .08 : 0, 0), t, settings); t += dt;
+                require(result.safetyBlocked && noInput(result), "jittering open palm does not rearm");
+            }
+            for (int i = 0; i < hz; ++i) {
+                result = e.update(open, t, settings); t += dt;
+                require(noInput(result), "stable open palm rearms without replaying motion");
+            }
+            require(!result.safetyBlocked, "stable open palm clears protection");
+            result = e.update(shifted(open, .6, 0), t, settings); t += dt;
+            require(result.safetyBlocked && noInput(result), "landmark teleport is blocked");
+            e.reset();
+            for (int i = 0; i < hz / 2; ++i) { e.update(fist, t, settings); t += dt; }
+            result = e.update(pinch, t, settings); t += dt;
+            require(result.safetyBlocked && noInput(result), "fist misread as pinch never clicks");
+            e.reset();
+            for (int i = 0; i < hz / 2; ++i) { e.update(fist, t, settings); t += dt; }
+            for (int i = 1; i <= hz; ++i) {
+                result = e.update(shifted(fist, 0, -.3 * i / hz), t, settings); t += dt;
+                require(!result.safetyBlocked && std::abs(result.scroll) <= 1 && result.dx == 0 && result.dy == 0,
+                    "deliberate scrolling is bounded and never moves cursor");
+            }
+            result = e.update(shifted(fist, .7, -.3), t, settings);
+            require(result.safetyBlocked && noInput(result), "jump during scrolling cannot produce a scroll burst");
+        }
         std::cout << "Gesture, timing, pause, loss and movement tests passed.\n";
         return 0;
     } catch (const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }

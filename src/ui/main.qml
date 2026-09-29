@@ -149,8 +149,9 @@ ApplicationWindow {
                         Layout.fillWidth: true; spacing: 12
                         Repeater {
                             model: [
-                                {label: "SNÍMÁNÍ", value: controller.running ? controller.fps.toFixed(0) + " fps" : "—"},
-                                {label: "ZPRACOVÁNÍ", value: controller.running ? controller.inferenceMs.toFixed(0) + " ms" : "—"},
+                                {label: "KAMERA", value: controller.running ? controller.cameraFps.toFixed(0) + " fps" : "—"},
+                                {label: "ROZPOZNÁVÁNÍ / NÁHLED", value: controller.running ? controller.fps.toFixed(0) + " fps" : "—"},
+                                {label: "INFERENCE · CPU", value: controller.running ? controller.inferenceMs.toFixed(0) + " ms" : "—"},
                                 {label: "RUKA V ZÁBĚRU", value: controller.handVisible ? (controller.confidence * 100).toFixed(0) + " %" : "—"}
                             ]
                             delegate: GlassPanel {
@@ -173,6 +174,7 @@ ApplicationWindow {
                             SettingToggle { title: "Ovládat kurzor"; description: ""; checked: !window.preferences.previewOnly; onToggled: function(value) { settings.setValue("previewOnly", !value) } }
                         }
                     }
+                    Text { Layout.fillWidth: true; wrapMode: Text.WordWrap; visible: controller.running; text: controller.cameraMode + " · odezva " + controller.latencyMs.toFixed(0) + " ms · kreslení " + controller.renderMs.toFixed(1) + " ms"; color: "#9badc3"; font.pixelSize: 10 }
                     Text { text: "Esc zastaví kameru  ·  Mezerník přepne pauzu  ·  Globální zkratky najdeš v průvodci"; color: "#93a5bd"; font.pixelSize: 10; Layout.alignment: Qt.AlignHCenter; Layout.bottomMargin: 6 }
                 }
                 ScrollView {
@@ -217,7 +219,39 @@ ApplicationWindow {
                                     }
                                     ActionButton { text: "Obnovit"; compact: true; onClicked: controller.refreshCameras() }
                                 }
-                                Text { text: "Změna kamery zastaví snímání. Potom ji znovu spusť."; color: "#9badc3"; font.pixelSize: 11 }
+                                ComboBox {
+                                    Layout.fillWidth: true
+                                    model: controller.fpsOptions; textRole: "label"; valueRole: "value"
+                                    currentIndex: window.preferences.cameraFps === 60 ? 1 : 0
+                                    onActivated: {
+                                        if (controller.fpsOptions[currentIndex].available) settings.setValue("cameraFps", currentValue)
+                                        else currentIndex = Qt.binding(function() { return window.preferences.cameraFps === 60 ? 1 : 0 })
+                                    }
+                                    delegate: ItemDelegate {
+                                        required property var modelData
+                                        width: ListView.view.width
+                                        text: modelData.label; enabled: modelData.available
+                                    }
+                                    Accessible.name: "Požadovaná snímková frekvence"
+                                    palette.buttonText: "#edf3fb"; palette.button: "#344457"; palette.text: "#edf3fb"; palette.base: "#243346"; palette.highlight: "#466382"
+                                }
+                                ComboBox {
+                                    Layout.fillWidth: true
+                                    model: controller.resolutionOptions; textRole: "label"; valueRole: "value"
+                                    currentIndex: {
+                                        const choices = controller.resolutionOptions
+                                        for (let i = 0; i < choices.length; ++i)
+                                            if (choices[i].value === window.preferences.cameraResolution) return i
+                                        return 0
+                                    }
+                                    onActivated: settings.setValue("cameraResolution", currentValue)
+                                    Accessible.name: "Rozlišení kamery"
+                                    palette.buttonText: "#edf3fb"; palette.button: "#344457"; palette.text: "#edf3fb"; palette.base: "#243346"; palette.highlight: "#466382"
+                                }
+                                Text { Layout.fillWidth: true; wrapMode: Text.WordWrap; text: "Změna kamery, rozlišení nebo FPS snímání automaticky restartuje. Za šera může skutečná rychlost klesnout; pomůže více světla."; color: "#9badc3"; font.pixelSize: 11 }
+                                Text { Layout.fillWidth: true; wrapMode: Text.WordWrap; visible: controller.cameraMode.length > 0; text: controller.cameraMode; color: "#b9cee5"; font.pixelSize: 11 }
+                                Text { text: "Výpočet: " + controller.backend; color: "#9badc3"; font.pixelSize: 11 }
+                                Text { Layout.fillWidth: true; wrapMode: Text.WordWrap; text: "Ochrana pohybu: při výpadku nebo nejistém scrollování se ovládání zastaví. Obnovíš ho stabilní otevřenou dlaní (0,2 s)."; color: "#b9cee5"; font.pixelSize: 11 }
                                 SettingToggle { Layout.fillWidth: true; title: "Zrcadlit obraz"; description: "Ruka se pohybuje stejným směrem jako kurzor."; checked: window.preferences.mirror; onToggled: function(v) { settings.setValue("mirror", v) } }
                                 SettingToggle { Layout.fillWidth: true; title: "Zobrazit body ruky"; description: "Pomocná kresba pro kontrolu rozpoznávání."; checked: window.preferences.skeleton; onToggled: function(v) { settings.setValue("skeleton", v) } }
                                 SettingSlider { Layout.fillWidth: true; title: "Citlivost dotyku prstů"; description: "Vyšší hodnota dovolí větší mezeru mezi prsty."; from: 0.15; to: 0.6; value: window.preferences.pinchThreshold; displayValue: value.toFixed(2); onEdited: function(v) { settings.setValue("pinchThreshold", v) } }

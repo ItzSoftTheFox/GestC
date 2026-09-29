@@ -1,100 +1,66 @@
-# Předání práce: FPS kamery a GPU
+# FPS kamery a GPU — výsledek práce
 
-Zapsáno 2026-09-28. Zatím pouze poznámky, bez implementace těchto změn.
+Aktualizováno 2026-09-29. Zadání z 2026-09-28 je implementováno a ověřeno
+v rozsahu dostupné kamery. Podrobné měření je v [camera-performance.md](camera-performance.md).
 
-## Nejnovější zadání uživatele
+## Doplnění: rozlišení a ochrana pohybu
 
-Po přestavbě aplikace podle uživatele nejspíš fungovala dobře, ale kamera
-momentálně dosahuje maximálně přibližně **10 fps**. Další požadavky:
+- Přidaná uložená volba rozlišení včetně 1280×720, nabídka podle kamery a
+  řízený restart. Výchozí automatika zůstává poblíž 640×480.
+- 720p MJPEG ověřeno: kamera přibližně 30 fps, výsledky přibližně 29 fps.
+- Při ztrátě ruky, skoku bodů či nejistém přechodu z pěsti se vstup zastaví.
+  Pokračování vyžaduje otevřenou klidnou dlaň po dobu 0,2 s. Automatické
+  znovuspuštění scrollu po výpadku je zakázané; scroll je vyhlazený a omezený.
+- Rozšířené testy simulují výpadky pěsti, falešný pinch, skoky a chvění při
+  15/30/60 fps. Přesnost rozpoznávání konkrétní uživatelovy pěsti je potřeba
+  vyzkoušet v živém náhledu; vyšší rozlišení samo ji nezaručuje.
 
-- Přidat do nastavení **volbu 30 / 60 fps**.
-- Vyřešit skutečnou rychlost snímání, nikoli pouze přidat přepínač.
-- Prověřit **výpočet rozpoznávání přes GPU**, pokud přinese zlepšení.
-- V této fázi požadavky jen zapsat; implementaci zahájit až na další pokyn.
+## Hotovo
 
-## Výchozí stav
+- Nalezena hlavní příčina nízkých FPS: jediný V4L2 buffer. Samotné snímání
+  dosahovalo přibližně 14 fps; dva buffery umožňují souběh čtení a snímání.
+- Kamera a inference běží odděleně. Mezi nimi je jediný přepisovaný snímek,
+  do UI se stále předává nejvýš jeden nepotvrzený výsledek.
+- Uložená volba 30/60 fps v `Settings`, `AppSettings` a QML. Dostupnost a
+  potřebné rozlišení se zjišťují z V4L2. Nepodporovaná volba je označena;
+  uložený požadavek 60 na 30fps kameře přejde na skutečných 30 s vysvětlením.
+- Změna kamery/FPS řízeně restartuje snímání; nouzové zastavení ruší restart.
+- Ověřují se návratové hodnoty nastavování a čte skutečně vyjednaný režim.
+  Volí se MJPEG nebo YUYV podle podporovaných režimů.
+- Po dobu snímání se podle možností kamery zakáže snižování FPS automatickou
+  expozicí, původní hodnota se při ukončení obnoví. Expozice zůstává automatická.
+- UI rozlišuje FPS kamery, FPS doručeného rozpoznávání/náhledu, inferenci,
+  režim kamery a odezvu od převzetí snímku; zobrazuje používaný CPU backend.
+- Rozšířený `camera_check` měří čekání, dekódování, inferenci, přípravu náhledu,
+  předání výsledku a zahazování snímků. `backend_check` porovnává oba modely
+  proti CPU bez přidání neověřeného GPU přepínače do aplikace.
 
-- Proběhl overhaul UI, snímání, gest, systémového vstupu a struktury projektu.
-- Gesta vycházejí z `gesta.txt`; zachovat jejich význam.
-- Prostředí: Arch Linux, Hyprland 0.56.2 / Wayland, Qt 6.11.2, OpenCV 5.0.0.
-- Poslední ověření: 8/8 automatických testů prošlo. Test finálního pracovního
-  vlákna kamery zpracoval 40 snímků za přibližně 5 sekund, všechny s detekcí ruky.
-  Samotná inference průměrně trvala 21,4 ms. To nepotvrzuje 30 fps celé aplikace.
-- `src/tracking/camera_worker.cpp` nyní žádá 640×480 a 30 fps přes V4L2.
-  Výsledek `camera.set(...)` ani skutečně vyjednaný režim se nekontroluje.
-  Formát přenosu není explicitně vybraný. Hodnota FPS není uživatelské nastavení.
-- Kamera potřebuje úvodní `grab()` pro zahájení streamování; až potom funguje
-  `waitAny()` a `retrieve()`. Tento již opravený postup zachovat.
-- Čtení, inference a příprava náhledu běží v jednom pracovním vlákně.
-  Mechanismus `framePending_` omezuje frontu výsledků, aby kurzor nereagoval
-  na nahromaděné staré snímky.
-- FPS v UI se odvozuje od výsledků doručených do `Controller::receive`,
-  nikoli od všech snímků skutečně dodaných kamerou.
-- `src/tracking/hand_tracker.cpp` používá CPU se dvěma OpenCV vlákny.
-  Na OpenCV 5 explicitně volí `ENGINE_CLASSIC`: automaticky zvolený nový
-  engine při předchozím ověření nevracel všechny potřebné výstupy modelů.
-- Starý GPU přepínač byl odstraněn, protože nebyla ověřená kompatibilita
-  ani reálné zrychlení. Nevracet ho pouze jako kosmetickou volbu.
+## Ověřené výsledky
 
-## Doporučený postup při pokračování
+- Integrovaná SunplusIT kamera nabízí nejvýš 30 fps, včetně nižších rozlišení.
+- Finální pracovní vlákno: přibližně **30 fps**, MJPEG 640×480. Při požadavku
+  60 fps správně vyjednává a hlásí 30 fps.
+- Při zpoždění potvrzení výsledků o 150 ms: kamera stále přibližně 30 fps,
+  výsledky přibližně 5 fps, maximální naměřené stáří výsledku pod 50 ms.
+  Zahazování snímků nezpůsobilo frontu starých výsledků.
+- CPU zůstává vhodnější: OpenCL na RTX 3050 byl několikanásobně pomalejší
+  a hlásil chybu kompilace kernelu; CUDA backend v nainstalovaném OpenCV chybí.
+  Vulkan nedokončil první inferenci a diagnostika byla ukončena.
+- Všech 10 automatických testů prošlo (IPC mimo sandbox). Testy pokrývají nastavení, výběr režimů, restart/zrušení restartu,
+  odpojení, staré výsledky, gesta při 15/30/60 fps, systémový vstup, modely,
+  IPC a stránky UI. Detekce a stabilita sledování prošly i na testovacím obrázku ruky.
 
-### 1. Najít příčinu limitu kolem 10 fps
+## Co vyžaduje další hardware nebo ruční ověření
 
-- Zjistit konkrétní kameru a její podporované kombinace rozlišení, formátu
-  a snímkové frekvence, například přes `v4l2-ctl --list-formats-ext`.
-- Změřit samotné snímání bez inference a náhledu. Zvlášť měřit čekání na kameru,
-  dekódování, detekci, předání výsledku a vykreslení UI.
-- Zkontrolovat skutečně vyjednaný režim a výsledky nastavování parametrů.
-- Prověřit formát MJPEG oproti nekomprimovanému přenosu, expozici a osvětlení,
-  případně omezení připojení. Jsou to možné příčiny, nikoli potvrzená diagnóza.
-- Prověřit vliv `framePending_` a společné smyčky snímání/inference.
-  Optimalizace nesmí zvětšit frontu ani latenci ovládání.
+- Skutečné 60fps snímání lze fyzicky ověřit až na kameře podporující 60 fps.
+  Výběr nižšího rozlišení pro 60 fps je pokryt automatickým testem.
+- Rychlost rozpoznávání závisí na CPU a scéně; volba 60fps snímání neslibuje
+  60 rozpoznaných výsledků/s. Náhled je nadále navázaný na rozpoznávání.
+- Přesun skutečného okna a dlouhodobé ovládání v Hyprlandu vyžadují ruční
+  kontrolu. Automatické a kamerové testy neodesílají systémový vstup.
+- Případné budoucí CUDA/OpenVINO řešení vyžaduje jiný runtime/build a nové
+  měření obou modelů, stability ruky a celé pipeline. Aktuální GPU cesty
+  nejsou důvodem ke změně výchozího CPU.
 
-### 2. Volba 30 / 60 fps
-
-- Přidat uloženou volbu do `AppSettings`, datového `Settings` a QML nastavení.
-- Nabízet režimy s ohledem na možnosti vybrané kamery. Pokud 60 fps vyžaduje
-  jiné rozlišení nebo není podporováno, srozumitelně to zobrazit.
-- Změnu režimu aplikovat řízeným restartem snímání a ověřit její přijetí.
-- Rozlišit požadované FPS, skutečné FPS kamery a frekvenci rozpoznávání/náhledu.
-  Nezobrazovat požadovaných 60 fps jako naměřený výkon.
-- Zachovat časování gest nezávislé na FPS, plynulost kurzoru, odmítání starých
-  snímků a uvolnění vstupu při zastavení nebo ztrátě ruky.
-
-### 3. GPU inference
-
-- Nejprve zjistit dostupnou grafiku, ovladače a podporované výpočetní backendy.
-- Ověřit kompatibilitu obou přiložených TFLite modelů a všech potřebných
-  výstupů; případnou změnu runtime nebo formátu modelu podložit testem.
-- Porovnat CPU/GPU po zahřátí na stejných datech: inference, celková latence,
-  propustnost a stabilita sledování. Započítat i přenosy dat.
-- Pro 60 rozpoznaných snímků/s je rozpočet celé sériové pipeline přibližně
-  16,7 ms na snímek; dříve naměřených 21,4 ms CPU inference samo nestačí.
-  Plynulý 60fps náhled a 60fps rozpoznávání jsou dva odlišné cíle.
-- Nabídnout pouze dostupné a ověřené backendy, skutečně použitý backend
-  zobrazit a při selhání umožnit návrat na CPU s vysvětlením.
-
-## Soubory pro navázání
-
-- `src/tracking/camera_worker.*` — vyjednání režimu kamery, smyčka a předávání snímků.
-- `src/tracking/hand_tracker.*` — modely, inference a sledování ruky.
-- `src/gestures/gesture_engine.*` — nastavení a časově řízené vyhodnocení gest.
-- `src/app/settings.*` — validace a ukládání voleb.
-- `src/app/controller.*` — revize nastavení, stav, metriky a watchdog.
-- `src/ui/main.qml` — nastavení kamery a zobrazení výkonu.
-- `tests/camera_check.cpp` — opt-in test skutečného snímacího vlákna bez
-  systémového vstupu a bez ukládání obrazu.
-- `tests/model_tests.cpp` — kontrola modelů, volitelně reálný obrázek ruky.
-- `docs/architecture.md` a `README.md` — současná architektura a spuštění.
-
-## Ověření budoucí změny
-
-- Automatické testy a měření kamery v každém podporovaném režimu 30/60 fps.
-- Korektní reakce na nepodporované FPS a odpojení kamery.
-- Zachování klikání, tažení, Super + tažení, scrollovací kotvy a pauzy při
-  různých frekvencích snímků; žádné zaseknuté tlačítko nebo modifikátor.
-- GPU označit za funkční až po ověření skutečného backendu a výkonu.
-
-Lokální socket a skutečná zařízení mohou být v sandboxu nedostupné. Předchozí
-testy IPC a kamery proto vyžadovaly běh mimo sandbox; nezaměňovat tento limit
-prostředí za chybu aplikace.
+Spuštění nové sestavené aplikace: `./build/GestC`. Uživatelská instalace
+v `~/.local` se tímto během práce nepřepisovala.

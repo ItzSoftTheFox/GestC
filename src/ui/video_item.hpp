@@ -14,6 +14,7 @@ public:
     void setController(Controller* controller);
 signals:
     void controllerChanged();
+    void rendered(double ms);
 private:
     QImage image_;
     QPointer<Controller> controller_;

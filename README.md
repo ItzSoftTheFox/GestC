@@ -36,7 +36,7 @@ Instalace obsahuje i položku pro nabídku aplikací.
 
 ## První použití
 
-1. V **Nastavení** vyber kameru. Změna kamery zastaví aktuální snímání.
+1. V **Nastavení** vyber kameru, rozlišení a 30/60 fps. Změna kamery, rozlišení nebo FPS běžící snímání automaticky restartuje.
 2. V **Živém náhledu** spusť kameru. První spuštění používá **Pouze náhled**.
 3. Nech ruku celou v záběru, čelem ke kameře, s rovnoměrným osvětlením.
    Ověř kresbu bodů ruky a text rozpoznaného gesta.
@@ -48,6 +48,17 @@ Instalace obsahuje i položku pro nabídku aplikací.
 Obraz se neukládá ani neposílá po síti. Výběr režimu, kamery a ostatní nastavení
 se ukládají přes QSettings, obvykle do `~/.config/HandMouse/HandMouse.conf`.
 Kamera se při dalším spuštění sama nezapíná.
+
+V nabídce rozlišení lze zvolit i **1280 × 720** (na místní kameře 30 fps MJPEG).
+Volba **Automaticky** upřednostňuje rychlost a rozlišení poblíž 640 × 480.
+Konkrétní rozlišení má přednost před požadovanými FPS; případný náhradní režim
+aplikace zobrazí.
+
+Kamera nabízí pouze podporované frekvence; pokud 60 fps vyžaduje jiné
+rozlišení, uvidíš ho v nabídce. Uložený nepodporovaný požadavek se při spuštění
+nahradí dostupným režimem s vysvětlením. UI rozlišuje požadovaný režim,
+naměřené FPS kamery a FPS rozpoznávání/náhledu. Výpočet nyní používá CPU;
+místní GPU testy byly pomalejší. Podrobnosti: [měření výkonu](docs/camera-performance.md).
 
 ## Gesta
 
@@ -68,14 +79,20 @@ neposílají pohyb kurzoru. Pravý klik není součástí tohoto zadání.
 
 Ztráta ruky, pauza, zastavení, změna nastavení nebo chyba vstupu uvolní tlačítka
 i Super. Při nedostatku nových snímků hlídá vstup časovač. Při opětovném
-zachycení ruky vznikne nový počátek pohybu, takže kurzor nepřeskočí.
+zachycení ruky je po výpadku nutné ukázat **otevřenou dlaň klidně alespoň 0,2 s**.
+Stejná ochrana se zapne při skoku polohy/velikosti ruky, neznámém gestu nebo
+opuštění pěsti během scrollování. Pěst sama po výpadku scroll znovu nespustí
+ani se omylem nezmění v klik. Obnovení ovládání neposílá nahromaděný pohyb.
+Scroll je vyhlazený a omezený na 12 kroků/s a nejvýš jeden krok na výsledek.
+Stav ochrany se zobrazuje v náhledu. Tyto pojistky nezaručují bezchybné
+rozpoznávání každé ruky; nouzové zastavení klávesou Esc zůstává dostupné.
 
 ## Nastavení
 
 - **Rychlost kurzoru:** 0,2–3×; relativní pohyb funguje bez pevného rozlišení monitoru.
 - **Vyhlazování:** 0–100 %, časově řízený filtr nezávislý na frekvenci snímků.
 - **Rychlost scrollování:** rychlost roste se vzdáleností od kotvy; malý posun má mrtvou zónu.
-- **Kamera, zrcadlení a kresba bodů:** pro výběr a kontrolu obrazu.
+- **Kamera, rozlišení, 30/60 fps, zrcadlení a kresba bodů:** pro výběr a kontrolu obrazu.
 - **Citlivost dotyku prstů:** vzdálenost vztažená k velikosti dlaně, s hysterezí při držení.
 - **Jistota rozpoznání:** práh skutečné přítomnosti ruky, nikoli skóre levé/pravé ruky.
 - **Krytí skla:** 60–100 %; text a ovladače zůstávají neprůhledné.
@@ -156,15 +173,30 @@ tests/         gesta, vstup, nastavení, modely a opt-in test kamery
 docs/          Hyprland doplňky, architektura a omezení
 ```
 
-Automatické testy neotevírají kameru ani skutečná vstupní zařízení. Ověřují
+Automatické testy nespouštějí snímání ani skutečná vstupní zařízení. Ověřují
 časování gest, ztrátu ruky, pauzu, relativní pohyb, pořadí Super/klik,
 uvolnění při chybě, persistenci nastavení, oba modely a všechny stránky QML.
 
 Ruční test skutečné kamery, na pět sekund, bez systémového vstupu a ukládání obrazu:
 
 ```sh
-./build/camera_check models 0
+./build/camera_check models 0 30
+./build/camera_check models 0 60
+# Vyšší rozlišení bez zpožďování potvrzení:
+./build/camera_check models 0 30 0 1280x720
+# Uměle pomalý odběr výsledků — ověření zahazování starých snímků:
+./build/camera_check models 0 30 150
 ```
+
+Opt-in porovnání modelů na CPU/GPU (syntetické tenzory, bez kamery):
+
+```sh
+timeout 45s ./build/backend_check models cpu
+timeout 45s ./build/backend_check models opencl
+```
+
+Dostupné názvy: `cpu`, `opencl`, `opencl-fp16`, `cuda`, `vulkan`.
+Nedostupný backend vrací kód 3; GPU výsledek sám neověřuje stabilitu sledování.
 
 Test detekce a sledování na vlastním obrázku ruky:
 

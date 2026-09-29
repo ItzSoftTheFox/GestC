@@ -5,8 +5,18 @@
 Původní GestureScanner míchal kameru, DNN, gesta a systémový vstup v hlavním
 vlákně. Nahradily jej samostatné části:
 
-- `CameraWorker` vlastní kameru a modely. Čeká na V4L2 snímky s omezenou dobou
-  čekání, reaguje na přerušení a předává maximálně jeden nepotvrzený snímek.
+- `CameraWorker` vlastní kameru a pomocné vlákno inference. Kamera průběžně
+  čte do jediného přepisovaného slotu; inference zpracuje nejnovější snímek.
+  Do UI se předává nejvýš jeden nepotvrzený výsledek. Dva V4L2 buffery dovolují
+  současně snímat a číst; jediný buffer na místní UVC kameře půlil FPS.
+- `camera_device` čte podporované MJPEG/YUYV režimy přes V4L2. V automatickém režimu preferuje
+  požadovanou frekvenci a rozlišení poblíž 640×480. Uložená konkrétní dvojice
+  rozměrů má přednost před FPS; nedostupný režim se nahradí a změna se zobrazí. Pro souvislé/stepwise
+  rozměry zkouší 640×480, 640×360, 320×240 a 1280×720. Volbu rozlišení a 30/60 fps
+  controller aplikuje řízeným restartem; explicitní stop zruší plánovaný restart.
+  Worker kontroluje přijetí parametrů a hlásí skutečný režim. Pokud kamera
+  umožňuje řídit dynamickou frekvenci expozice, po dobu snímání ji vypne
+  a při konci obnoví původní hodnotu.
 - `HandTracker` provádí letterbox 192×192 pro detekci dlaně a natočený výřez
   224×224 pro body ruky. Další snímek používá oblast předchozí ruky; při ztrátě
   jistoty se vrací k detektoru dlaně. Náhled se kreslí až po inferenci.
@@ -71,8 +81,10 @@ přístup na stejného uživatele; příkazy nepřijímají shell kód.
 - Snímá se jedna ruka. Víc rukou nebo její zakrytí může změnit cíl sledování.
 - Heuristiky gest vyžadují rozumný pohled na dlaň. Reálné světlo, úhel a délka
   prstů vyžadují doladit citlivost; nejde o univerzálně vyhodnocený klasifikátor.
-- Cílových 30 fps se pouze požaduje od kamery; skutečná frekvence závisí na
-  zařízení a expozici. Výkon DNN a rychlost kamery se ukazují zvlášť.
+- Požadované 30/60 fps se porovnává s dostupnými režimy; skutečná rychlost
+  kamery a doručeného rozpoznávání/náhledu se měří zvlášť. Náhled stále běží
+  podle výsledků inference, nikoli jako samostatný 60fps proud. Čas snímku
+  začíná převzetím z V4L2, nikoli začátkem expozice.
 - Rychlost relativní myši ovlivňuje i profil akcelerace kompozitoru.
 - Při normálním ukončení se zařízení uvolní. Watchdog nechrání před kompletním
   zamrznutím celého procesu; k nouzovému ukončení slouží i správce procesů.
@@ -86,3 +98,42 @@ Testovací obrázek není součástí repozitáře. Test finálního pracovního
 kamery zpracoval za pět sekund 40 snímků, všechny s detekovanou rukou,
 s průměrnou inferencí 21,4 ms a čistým zastavením. Neodesílal systémový vstup. Celý scénář přesunu okna gestem je třeba
 prakticky ověřit v uživatelské session po zapojení pravidel.
+
+
+## Ověření FPS 2026-09-29
+
+Nová pipeline dosáhla přibližně 30 fps v 640×480 MJPEG; místní kamera 60 fps
+nepodporuje. Test se 150ms zpožděním potvrzování výsledků zachoval 30fps
+snímání a stáří doručených výsledků pod 50 ms. GPU přes OpenCL na RTX 3050
+bylo výrazně pomalejší a hlásilo chybu kernelu; CUDA v tomto OpenCV není
+k dispozici. Výchozí backend proto zůstává CPU. Úplná čísla, metodika
+měření a omezení jsou v [camera-performance.md](camera-performance.md).
+
+
+## Ochrana nestabilního sledování a rozlišení (2026-09-29)
+
+`cameraResolution` ukládá `auto` nebo validovanou dvojici `šířkaxvýška`.
+Snapshot ji převádí na `cameraWidth`/`cameraHeight` (nuly znamenají automatiku).
+Nabídka rozlišení pochází z V4L2, změna vyvolá stejný restart jako FPS.
+1280×720 MJPEG bylo ověřeno: kamera 30,39 fps, doručené výsledky 29,08 fps,
+inference průměrně 21,47 ms, nejvyšší stáří výsledku od převzetí 58,82 ms.
+Test nezachytil ruku, proto není dokladem přesnosti rozpoznávání sevřené pěsti.
+
+`GestureEngine::suspend()` uvolňuje logický stav tlačítek a scrollování a
+zapíná západku ochrany. Používá se při ztrátě/nízké jistotě ruky, neznámém
+gestu, neplatném časování, výpadku >250 ms, nepravděpodobném skoku středu
+nebo velikosti dlaně a při opuštění scrollovací pěsti. Stejnou západku
+používá controller při odmítnutí starého výsledku a při timeoutu watchdogu;
+pouhý reset by dovolil automaticky znovu rozjet scroll.
+
+Ochranu odblokuje až otevřená dlaň po 200 ms, která zůstane poblíž původního
+místa (tolerance max. 0,02 šířky obrazu nebo 15 % velikosti dlaně). Při
+odblokování nevzniká příkaz k pohybu ani klik. Běžný explicitní reset,
+změna nastavení a ruční pauza stav inicializují znovu.
+
+Scroll filtruje polohu s časovou konstantou 80 ms, omezuje rychlost na
+12 kroků/s a jeden krok na výsledek; přebytek nezůstává ve frontě.
+Regresní testy při 15/30/60 fps pokrývají ztracenou a znovu nalezenou pěst,
+přeskok na pinch, teleport bodů, neklidnou otevřenou dlaň, obnovení bez
+pohybu a omezení scrollu. Jde o pojistku nad rozpoznávačem, nikoli o opravu
+nebo ověření jeho přesnosti na videu uživatelovy pěsti.

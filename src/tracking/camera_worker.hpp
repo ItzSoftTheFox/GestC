@@ -12,6 +12,11 @@ struct TrackingFrame {
     quint64 revision = 0;
     double timestamp = 0;
     double inferenceMs = 0;
+    double cameraFps = 0;
+    double waitMs = 0;
+    double decodeMs = 0;
+    double previewMs = 0;
+    quint64 skippedFrames = 0;
 };
 Q_DECLARE_METATYPE(TrackingFrame)
 
@@ -27,6 +32,7 @@ public:
 signals:
     void frameReady(const TrackingFrame& frame);
     void cameraOpened();
+    void modeReady(const QString& description, double negotiatedFps);
     void failed(const QString& error);
 protected:
     void run() override;

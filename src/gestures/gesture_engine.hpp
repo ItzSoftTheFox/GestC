@@ -13,6 +13,8 @@ struct Settings {
     double pinchThreshold = 0.30;
     double confidence = 0.65;
     int camera = 0;
+    int cameraFps = 30;
+    int cameraWidth = 0, cameraHeight = 0; // Zero selects automatic resolution.
     bool mirror = true;
     bool skeleton = true;
     bool previewOnly = true;
@@ -23,6 +25,7 @@ struct Command {
     int scroll = 0;
     bool left = false, super = false, middleClick = false;
     bool paused = false;
+    bool safetyBlocked = false;
     Pose pose = Pose::None;
 };
 
@@ -30,12 +33,18 @@ class GestureEngine {
 public:
     Command update(const std::optional<Hand>& hand, double seconds, const Settings& settings);
     void reset();
+    void suspend();
     void setPaused(bool paused);
     bool paused() const { return paused_; }
     static Pose classify(const Hand& hand, double pinchThreshold);
     static const char* poseName(Pose pose);
 private:
     bool paused_ = false;
+    bool safetyBlocked_ = false, scrollSession_ = false;
+    double openSince_ = -1;
+    std::optional<Point> lastPalm_, openPalm_;
+    double lastPalmSize_ = 0;
+    double scrollPosition_ = 0;
     bool pauseLatched_ = false;
     bool middleLatched_ = false;
     Pose candidate_ = Pose::None;

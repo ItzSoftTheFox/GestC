@@ -46,6 +46,8 @@ Pose GestureEngine::classify(const Hand& h, double threshold) {
     return Pose::None;
 }
 void GestureEngine::reset() {
+    safetyBlocked_ = scrollSession_ = false;
+    openSince_ = -1; openPalm_.reset(); lastPalm_.reset(); lastPalmSize_ = 0;
     candidate_ = active_ = Pose::None;
     lastTime_ = -1;
     previous_.reset();
@@ -53,6 +55,10 @@ void GestureEngine::reset() {
     middleLatched_ = false;
     pauseLatched_ = false;
     pauseReleaseSince_ = -1;
+}
+void GestureEngine::suspend() {
+    reset();
+    safetyBlocked_ = true;
 }
 void GestureEngine::setPaused(bool paused) {
     reset();
@@ -62,17 +68,44 @@ Command GestureEngine::update(const std::optional<Hand>& hand, double now, const
     Command out;
     out.paused = paused_;
     if (!hand || !std::isfinite(hand->confidence) || hand->confidence < settings.confidence || !std::isfinite(now)) {
-        reset();
+        if (lastTime_ >= 0 || safetyBlocked_) suspend();
+        out.safetyBlocked = safetyBlocked_;
         return out;
     }
     const double dt = lastTime_ < 0 ? 1.0 / 30 : std::clamp(now - lastTime_, 0.001, 0.10);
     // A gap must never turn reacquisition into a cursor jump or held key.
-    if (lastTime_ >= 0 && (now - lastTime_ > 0.25 || now < lastTime_)) reset();
+    if (lastTime_ >= 0 && (now - lastTime_ > 0.25 || now <= lastTime_)) suspend();
     lastTime_ = now;
     double threshold = settings.pinchThreshold;
     if (active_ == Pose::LeftDrag || active_ == Pose::SuperDrag || active_ == Pose::MiddleClick) threshold += 0.07;
     const Pose pose = classify(*hand, threshold);
     out.pose = pose;
+    const Point position = palm(*hand);
+    const double palmSize = distance(hand->points[0], hand->points[9]);
+    // Do not turn a confident but discontinuous landmark estimate into input.
+    const double jumpLimit = std::max(0.08, std::min(0.22, lastPalmSize_ * 0.9)) + 0.6 * dt;
+    if (lastPalm_ && (distance(position, *lastPalm_) > jumpLimit ||
+        palmSize < lastPalmSize_ * 0.6 || palmSize > lastPalmSize_ * 1.65)) suspend();
+    if (pose == Pose::None || (scrollSession_ && pose != Pose::Scroll)) suspend();
+    if (pose != Pose::None) { lastPalm_ = position; lastPalmSize_ = palmSize; }
+    if (safetyBlocked_) {
+        out.safetyBlocked = true;
+        if (pose != Pose::Move) { openSince_ = -1; openPalm_.reset(); }
+        else {
+            if (openSince_ < 0 || !openPalm_ || distance(position, *openPalm_) > std::max(0.02, palmSize * 0.15)) {
+                openSince_ = now; openPalm_ = position;
+            }
+            if (now - openSince_ >= 0.2) {
+                reset();
+                lastTime_ = now; lastPalm_ = position; lastPalmSize_ = palmSize;
+                active_ = candidate_ = Pose::Move; candidateSince_ = now;
+                filtered_ = position; previous_ = position;
+                out.safetyBlocked = false;
+            }
+        }
+        return out; // Rearming itself never moves, clicks or scrolls.
+    }
+    if (pose == Pose::Scroll) scrollSession_ = true;
     if (pose != candidate_) {
         candidate_ = pose;
         candidateSince_ = now;
@@ -103,15 +136,17 @@ Command GestureEngine::update(const std::optional<Hand>& hand, double now, const
         active_ = Pose::None;
         if (now - candidateSince_ < 0.065) return out;
         active_ = pose;
-        scrollAnchor_ = palm(*hand).y;
+        scrollAnchor_ = scrollPosition_ = position.y;
     }
-    const Point position = palm(*hand);
     if (pose == Pose::Scroll) {
-        const double offset = scrollAnchor_ - position.y;
+        scrollPosition_ += (1 - std::exp(-dt / 0.08)) * (position.y - scrollPosition_);
+        const double offset = scrollAnchor_ - scrollPosition_;
         const double outsideDeadzone = std::max(0.0, std::abs(offset) - 0.025);
-        scrollRemainder_ += std::copysign(outsideDeadzone, offset) * settings.scrollSpeed * 15 * dt;
-        out.scroll = static_cast<int>(scrollRemainder_);
-        scrollRemainder_ -= out.scroll;
+        const double rate = std::clamp(std::copysign(outsideDeadzone, offset) * settings.scrollSpeed * 15, -12.0, 12.0);
+        scrollRemainder_ += rate * dt;
+        const int wholeSteps = static_cast<int>(scrollRemainder_);
+        out.scroll = std::clamp(wholeSteps, -1, 1);
+        scrollRemainder_ -= wholeSteps; // Discard bursts; never replay accumulated input.
         return out;
     }
     if (pose == Pose::MiddleClick) {
